@@ -20,11 +20,21 @@ project now has a separate Cargo feature:
 cargo build --features android-gui --target aarch64-linux-android
 ```
 
-The local Windows environment has Rust Android targets installed, but does not
-currently have the Android SDK/NDK compiler tools, `cargo-apk`, `cargo-ndk`,
-`adb`, or Gradle. A target check reaches native dependency compilation and then
-fails because `aarch64-linux-android-clang` is missing, so APK validation must
-be done after installing Android SDK/NDK tooling.
+The local Windows environment has Rust Android targets, Android SDK/NDK,
+`cargo-apk`, `cargo-ndk`, and `adb` installed. A debug APK can be built with:
+
+```bash
+cargo apk build --features android-gui --target aarch64-linux-android --lib
+```
+
+Release APK signing must stay local. Do not commit keystores or passwords; pass
+them through environment variables when creating a release artifact:
+
+```bash
+CARGO_APK_RELEASE_KEYSTORE=/path/to/release.keystore \
+CARGO_APK_RELEASE_KEYSTORE_PASSWORD=... \
+cargo apk build --release --features android-gui --target aarch64-linux-android --lib
+```
 
 ## Proposed architecture
 

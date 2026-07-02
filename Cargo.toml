@@ -35,6 +35,13 @@ default = []
 gui = ["dep:slint", "dep:tray-icon", "slint/std", "slint/backend-winit", "slint/renderer-software", "slint/compat-1-2"]
 android-gui = ["dep:slint", "slint/std", "slint/backend-android-activity-06", "slint/renderer-software", "slint/compat-1-2"]
 
+[package.metadata.android]
+package = "rust.vimit"
+apk_name = "vimit"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
 [dependencies]
 chrono = "0.4"
 crossterm = "0.28"
