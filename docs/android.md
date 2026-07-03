@@ -36,6 +36,22 @@ CARGO_APK_RELEASE_KEYSTORE_PASSWORD=... \
 cargo apk build --release --features android-gui --target aarch64-linux-android --lib
 ```
 
+## API key entry and storage
+
+Do not bake `VIBEMODE_API_KEY` into the APK, Android manifest, release
+keystore, or repository files. Install the APK, open vimit on the phone, paste
+the key into the `VIBEMODE_API_KEY` field, tap `Save key`, then tap `Check`.
+
+The Android UI clears the input after a successful save and keeps the key in the
+app's private data directory as `vimit-api-key`. Other normal Android apps
+cannot read that directory, and vimit must not print the key to logs.
+
+This is acceptable for test APKs, but it is not full encryption-at-rest. A rooted
+device, device backup with app data access, debug tooling with the app UID, or a
+compromised app process could still expose the key. Production hardening should
+move the saved key to Android Keystore-backed encrypted storage before treating
+the Android build as release-ready.
+
 ## Proposed architecture
 
 - Reuse existing quota parsing, API failover, thresholds, and creature state
