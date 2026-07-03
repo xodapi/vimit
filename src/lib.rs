@@ -451,6 +451,102 @@ impl AgentPulse {
     }
 }
 
+pub const DEFAULT_STUCK_BURN_MIN_RATE_PER_SEC: f64 = 0.1;
+pub const DEFAULT_STUCK_BURN_TIMEOUT_SECS: u64 = 90;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentBurnState {
+    Unknown,
+    Idle,
+    Active,
+    Runaway,
+    Recovery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AgentBurnConfig {
+    pub min_rate_per_sec: f64,
+    pub timeout_secs: u64,
+}
+
+impl Default for AgentBurnConfig {
+    fn default() -> Self {
+        Self {
+            min_rate_per_sec: DEFAULT_STUCK_BURN_MIN_RATE_PER_SEC,
+            timeout_secs: DEFAULT_STUCK_BURN_TIMEOUT_SECS,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentBurnEvent {
+    pub state: AgentBurnState,
+    pub burning_for_secs: Option<u64>,
+    pub token_rate_per_sec: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentBurnDetector {
+    config: AgentBurnConfig,
+    burning_since_secs: Option<u64>,
+    last_state: AgentBurnState,
+}
+
+impl AgentBurnDetector {
+    pub fn new(config: AgentBurnConfig) -> Self {
+        Self {
+            config,
+            burning_since_secs: None,
+            last_state: AgentBurnState::Unknown,
+        }
+    }
+
+    pub fn observe(&mut self, pulse: &AgentPulse, now_secs: u64) -> AgentBurnEvent {
+        let burning = pulse.token_rate_known
+            && pulse.token_rate_per_sec >= self.config.min_rate_per_sec
+            && matches!(pulse.activity, AgentActivity::Active);
+
+        if !burning {
+            self.burning_since_secs = None;
+            let state = match pulse.activity {
+                AgentActivity::Idle => {
+                    if matches!(
+                        self.last_state,
+                        AgentBurnState::Active | AgentBurnState::Runaway
+                    ) {
+                        AgentBurnState::Recovery
+                    } else {
+                        AgentBurnState::Idle
+                    }
+                }
+                AgentActivity::Unknown => AgentBurnState::Unknown,
+                AgentActivity::Active => AgentBurnState::Active,
+            };
+            self.last_state = state;
+            return AgentBurnEvent {
+                state,
+                burning_for_secs: None,
+                token_rate_per_sec: pulse.token_rate_per_sec,
+            };
+        }
+
+        let started = *self.burning_since_secs.get_or_insert(now_secs);
+        let burning_for_secs = now_secs.saturating_sub(started);
+        let state = if burning_for_secs >= self.config.timeout_secs {
+            AgentBurnState::Runaway
+        } else {
+            AgentBurnState::Active
+        };
+        self.last_state = state;
+
+        AgentBurnEvent {
+            state,
+            burning_for_secs: Some(burning_for_secs),
+            token_rate_per_sec: pulse.token_rate_per_sec,
+        }
+    }
+}
+
 // ── API (now in api.rs) ─────────────────────────────────────────────────────
 // HttpClient, Router, fetch_me, load_mock moved to api.rs
 
@@ -1003,5 +1099,92 @@ mod tests {
         assert!(!pulse.token_rate_known);
         assert_eq!(pulse.interval_ms, 1000);
         assert_eq!(pulse.token_rate_per_tick, 0.0);
+    }
+
+    #[test]
+    fn burn_detector_keeps_short_activity_normal() {
+        let mut detector = AgentBurnDetector::new(AgentBurnConfig {
+            min_rate_per_sec: 1.0,
+            timeout_secs: 60,
+        });
+        let pulse = AgentPulse::from_abtop_status(&json!({
+            "interval_ms": 1000,
+            "token_rate": 10.0,
+            "sessions_total": 1,
+            "sessions_active": 1
+        }));
+
+        let first = detector.observe(&pulse, 100);
+        let later = detector.observe(&pulse, 130);
+
+        assert_eq!(first.state, AgentBurnState::Active);
+        assert_eq!(first.burning_for_secs, Some(0));
+        assert_eq!(later.state, AgentBurnState::Active);
+        assert_eq!(later.burning_for_secs, Some(30));
+    }
+
+    #[test]
+    fn burn_detector_marks_runaway_after_timeout() {
+        let mut detector = AgentBurnDetector::new(AgentBurnConfig {
+            min_rate_per_sec: 1.0,
+            timeout_secs: 60,
+        });
+        let pulse = AgentPulse::from_abtop_status(&json!({
+            "interval_ms": 1000,
+            "token_rate": 10.0,
+            "sessions_total": 1,
+            "sessions_active": 1
+        }));
+
+        detector.observe(&pulse, 100);
+        let event = detector.observe(&pulse, 161);
+
+        assert_eq!(event.state, AgentBurnState::Runaway);
+        assert_eq!(event.burning_for_secs, Some(61));
+        assert_eq!(event.token_rate_per_sec, 10.0);
+    }
+
+    #[test]
+    fn burn_detector_recovers_when_rate_drops_to_zero() {
+        let mut detector = AgentBurnDetector::new(AgentBurnConfig {
+            min_rate_per_sec: 1.0,
+            timeout_secs: 60,
+        });
+        let burning = AgentPulse::from_abtop_status(&json!({
+            "interval_ms": 1000,
+            "token_rate": 10.0,
+            "sessions_total": 1,
+            "sessions_active": 1
+        }));
+        let idle = AgentPulse::from_abtop_status(&json!({
+            "interval_ms": 1000,
+            "token_rate": 0.0,
+            "sessions_total": 1,
+            "sessions_active": 0
+        }));
+
+        detector.observe(&burning, 100);
+        detector.observe(&burning, 161);
+        let event = detector.observe(&idle, 170);
+
+        assert_eq!(event.state, AgentBurnState::Recovery);
+        assert_eq!(event.burning_for_secs, None);
+    }
+
+    #[test]
+    fn burn_detector_does_not_alarm_on_unknown_rate() {
+        let mut detector = AgentBurnDetector::new(AgentBurnConfig {
+            min_rate_per_sec: 1.0,
+            timeout_secs: 60,
+        });
+        let pulse = AgentPulse::from_abtop_status(&json!({
+            "sessions_total": 1,
+            "sessions_active": 1
+        }));
+
+        let event = detector.observe(&pulse, 100);
+
+        assert_eq!(event.state, AgentBurnState::Active);
+        assert_eq!(event.burning_for_secs, None);
     }
 }
