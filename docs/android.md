@@ -17,14 +17,13 @@ Slint supports Android through the `backend-android-activity-06` backend. The
 project now has a separate Cargo feature:
 
 ```bash
-cargo build --features android-gui --target aarch64-linux-android
+cargo apk build --features android-gui --target aarch64-linux-android --lib
 ```
 
-The local Windows environment has Rust Android targets installed, but does not
-currently have the Android SDK/NDK compiler tools, `cargo-apk`, `cargo-ndk`,
-`adb`, or Gradle. A target check reaches native dependency compilation and then
-fails because `aarch64-linux-android-clang` is missing, so APK validation must
-be done after installing Android SDK/NDK tooling.
+The local Windows environment has Android SDK/NDK tooling and `cargo-apk`
+available when `ANDROID_HOME` / `ANDROID_NDK_HOME` are configured. If the build
+fails before Rust compilation with missing `aarch64-linux-android-clang`,
+install the Android NDK and point `ANDROID_NDK_HOME` to it.
 
 ## Proposed architecture
 
@@ -53,6 +52,43 @@ to the user and compliant with Android background execution limits.
 3. Validate a demo APK on a device or emulator.
 4. Add notification/widget mode.
 5. Only then test optional native overlay permission flow.
+
+## Manual test APK
+
+Use the GitHub Actions workflow for a safe manual-test APK without creating a
+production release:
+
+1. Open GitHub Actions.
+2. Select `Android Test APK`.
+3. Click `Run workflow` on the branch you want to test.
+4. Download the `vimit-android-test-apk` artifact.
+5. Install `vimit.apk` on a device or emulator.
+
+The artifact also contains `permissions.txt`, produced from the APK manifest.
+It must include:
+
+- `android.permission.INTERNET`
+- `android.permission.VIBRATE`
+- `android.permission.POST_NOTIFICATIONS`
+
+Local build and manifest verification:
+
+```bash
+rustup target add aarch64-linux-android
+cargo install cargo-apk --locked
+rustc tools/guarded-run.rs -O -o target/guarded-run
+./target/guarded-run --timeout-secs 1800 --heartbeat-secs 30 -- \
+  cargo apk build --features android-gui --target aarch64-linux-android --lib
+aapt dump permissions target/debug/apk/vimit.apk
+```
+
+`tools/guarded-run.rs` is a tiny Rust wrapper for long-running commands. It
+prints heartbeat messages and exits with code `124` if the command exceeds the
+timeout, which helps distinguish a real build hang from normal Android build
+work.
+
+This is intentionally not a GitHub Release. Release tags and production
+release assets stay under the existing release workflow.
 
 ## Agent burn alerts
 
