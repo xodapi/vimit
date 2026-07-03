@@ -6490,6 +6490,7 @@ dependencies = [
  "crossterm",
  "fs3",
  "insta",
+ "jni 0.22.4",
  "rand",
  "ratatui",
  "redb",

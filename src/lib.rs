@@ -453,6 +453,7 @@ impl AgentPulse {
 
 pub const DEFAULT_STUCK_BURN_MIN_RATE_PER_SEC: f64 = 0.1;
 pub const DEFAULT_STUCK_BURN_TIMEOUT_SECS: u64 = 90;
+pub const DEFAULT_ANDROID_ALERT_COOLDOWN_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentBurnState {
@@ -545,6 +546,282 @@ impl AgentBurnDetector {
             token_rate_per_sec: pulse.token_rate_per_sec,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AndroidAlertText {
+    pub title: &'static str,
+    pub body: &'static str,
+}
+
+pub fn android_runaway_alert_text() -> AndroidAlertText {
+    AndroidAlertText {
+        title: "Vimichi: агент горит токенами",
+        body: "Расход токенов продолжается, но задача не завершается. Проверьте агента.",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AndroidAlertGate {
+    cooldown_secs: u64,
+    last_alert_secs: Option<u64>,
+}
+
+impl AndroidAlertGate {
+    pub fn new(cooldown_secs: u64) -> Self {
+        Self {
+            cooldown_secs,
+            last_alert_secs: None,
+        }
+    }
+
+    pub fn should_alert(&mut self, event: &AgentBurnEvent, now_secs: u64) -> bool {
+        if event.state != AgentBurnState::Runaway {
+            self.last_alert_secs = None;
+            return false;
+        }
+
+        let should_alert = self
+            .last_alert_secs
+            .map(|last| now_secs.saturating_sub(last) >= self.cooldown_secs)
+            .unwrap_or(true);
+
+        if should_alert {
+            self.last_alert_secs = Some(now_secs);
+        }
+        should_alert
+    }
+}
+
+impl Default for AndroidAlertGate {
+    fn default() -> Self {
+        Self::new(DEFAULT_ANDROID_ALERT_COOLDOWN_SECS)
+    }
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+pub struct AndroidAlertBridge {
+    app: slint::android::AndroidApp,
+    gate: Mutex<AndroidAlertGate>,
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+impl AndroidAlertBridge {
+    pub fn new(app: slint::android::AndroidApp) -> Self {
+        Self {
+            app,
+            gate: Mutex::new(AndroidAlertGate::default()),
+        }
+    }
+
+    pub fn alert_runaway(&self, event: &AgentBurnEvent, now_secs: u64) -> Result<bool, String> {
+        if !self.gate.lock().unwrap().should_alert(event, now_secs) {
+            return Ok(false);
+        }
+
+        let text = android_runaway_alert_text();
+        android_vibrate(&self.app, 450)?;
+        android_show_notification(&self.app, &text)?;
+        Ok(true)
+    }
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_vibrate(app: &slint::android::AndroidApp, duration_ms: i64) -> Result<(), String> {
+    let app = app.clone();
+    android_run_on_java_main_thread(&app, move |env, activity| {
+        let service_name = env.new_string("vibrator")?;
+        let service_name = jni::objects::JObject::from(service_name);
+        let vibrator = env
+            .call_method(
+                activity,
+                jni::jni_str!("getSystemService"),
+                jni::jni_sig!("(Ljava/lang/String;)Ljava/lang/Object;"),
+                &[jni::objects::JValue::Object(&service_name)],
+            )?
+            .l()?;
+
+        if vibrator.as_raw().is_null() {
+            return Ok(());
+        }
+
+        env.call_method(
+            &vibrator,
+            jni::jni_str!("vibrate"),
+            jni::jni_sig!("(J)V"),
+            &[jni::objects::JValue::Long(duration_ms)],
+        )?;
+        Ok(())
+    })
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_show_notification(
+    app: &slint::android::AndroidApp,
+    text: &AndroidAlertText,
+) -> Result<(), String> {
+    let app = app.clone();
+    let title = text.title.to_string();
+    let body = text.body.to_string();
+    android_run_on_java_main_thread(&app, move |env, activity| {
+        let channel_id = "vimit-agent-alerts";
+        let service_name = env.new_string("notification")?;
+        let service_name = jni::objects::JObject::from(service_name);
+        let manager = env
+            .call_method(
+                activity,
+                jni::jni_str!("getSystemService"),
+                jni::jni_sig!("(Ljava/lang/String;)Ljava/lang/Object;"),
+                &[jni::objects::JValue::Object(&service_name)],
+            )?
+            .l()?;
+
+        if manager.as_raw().is_null() {
+            return Ok(());
+        }
+
+        let sdk = android_sdk_int(env)?;
+        if sdk >= 26 {
+            android_create_notification_channel(env, &manager, channel_id)?;
+        }
+
+        let channel = env.new_string(channel_id)?;
+        let builder = if sdk >= 26 {
+            let channel = jni::objects::JObject::from(channel);
+            env.new_object(
+                jni::jni_str!("android/app/Notification$Builder"),
+                jni::jni_sig!("(Landroid/content/Context;Ljava/lang/String;)V"),
+                &[
+                    jni::objects::JValue::Object(activity),
+                    jni::objects::JValue::Object(&channel),
+                ],
+            )?
+        } else {
+            env.new_object(
+                jni::jni_str!("android/app/Notification$Builder"),
+                jni::jni_sig!("(Landroid/content/Context;)V"),
+                &[jni::objects::JValue::Object(activity)],
+            )?
+        };
+
+        let icon_class = env.find_class(jni::jni_str!("android/R$drawable"))?;
+        let icon = env
+            .get_static_field(
+                icon_class,
+                jni::jni_str!("stat_sys_warning"),
+                jni::jni_sig!("I"),
+            )?
+            .i()?;
+        env.call_method(
+            &builder,
+            jni::jni_str!("setSmallIcon"),
+            jni::jni_sig!("(I)Landroid/app/Notification$Builder;"),
+            &[jni::objects::JValue::Int(icon)],
+        )?;
+
+        let title = env.new_string(title)?;
+        let title = jni::objects::JObject::from(title);
+        env.call_method(
+            &builder,
+            jni::jni_str!("setContentTitle"),
+            jni::jni_sig!("(Ljava/lang/CharSequence;)Landroid/app/Notification$Builder;"),
+            &[jni::objects::JValue::Object(&title)],
+        )?;
+
+        let body = env.new_string(body)?;
+        let body = jni::objects::JObject::from(body);
+        env.call_method(
+            &builder,
+            jni::jni_str!("setContentText"),
+            jni::jni_sig!("(Ljava/lang/CharSequence;)Landroid/app/Notification$Builder;"),
+            &[jni::objects::JValue::Object(&body)],
+        )?;
+        env.call_method(
+            &builder,
+            jni::jni_str!("setAutoCancel"),
+            jni::jni_sig!("(Z)Landroid/app/Notification$Builder;"),
+            &[jni::objects::JValue::Bool(true)],
+        )?;
+
+        let notification = env
+            .call_method(
+                &builder,
+                jni::jni_str!("build"),
+                jni::jni_sig!("()Landroid/app/Notification;"),
+                &[],
+            )?
+            .l()?;
+        env.call_method(
+            &manager,
+            jni::jni_str!("notify"),
+            jni::jni_sig!("(ILandroid/app/Notification;)V"),
+            &[
+                jni::objects::JValue::Int(111),
+                jni::objects::JValue::Object(&notification),
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_create_notification_channel(
+    env: &mut jni::Env,
+    manager: &jni::objects::JObject,
+    channel_id: &str,
+) -> jni::errors::Result<()> {
+    let id = env.new_string(channel_id)?;
+    let id = jni::objects::JObject::from(id);
+    let name = env.new_string("Vimichi agent alerts")?;
+    let name = jni::objects::JObject::from(name);
+    let channel = env.new_object(
+        jni::jni_str!("android/app/NotificationChannel"),
+        jni::jni_sig!("(Ljava/lang/String;Ljava/lang/CharSequence;I)V"),
+        &[
+            jni::objects::JValue::Object(&id),
+            jni::objects::JValue::Object(&name),
+            jni::objects::JValue::Int(4),
+        ],
+    )?;
+    env.call_method(
+        manager,
+        jni::jni_str!("createNotificationChannel"),
+        jni::jni_sig!("(Landroid/app/NotificationChannel;)V"),
+        &[jni::objects::JValue::Object(&channel)],
+    )?;
+    Ok(())
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_sdk_int(env: &mut jni::Env) -> jni::errors::Result<i32> {
+    let version = env.find_class(jni::jni_str!("android/os/Build$VERSION"))?;
+    env.get_static_field(version, jni::jni_str!("SDK_INT"), jni::jni_sig!("I"))?
+        .i()
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_run_on_java_main_thread<F>(
+    app: &slint::android::AndroidApp,
+    callback: F,
+) -> Result<(), String>
+where
+    F: FnOnce(&mut jni::Env, &jni::objects::JObject) -> jni::errors::Result<()> + Send + 'static,
+{
+    if app.vm_as_ptr().is_null() || app.activity_as_ptr().is_null() {
+        return Err("Android activity is not available".to_string());
+    }
+
+    let app = app.clone();
+    app.clone().run_on_java_main_thread(Box::new(move || {
+        let vm = unsafe { jni::JavaVM::from_raw(app.vm_as_ptr() as _) };
+        let _ = vm.attach_current_thread(|env| {
+            let activity = unsafe {
+                jni::objects::JObject::from_raw(env, app.activity_as_ptr() as jni::sys::jobject)
+            };
+            callback(env, &activity)
+        });
+    }));
+    Ok(())
 }
 
 // ── API (now in api.rs) ─────────────────────────────────────────────────────
@@ -1186,5 +1463,64 @@ mod tests {
 
         assert_eq!(event.state, AgentBurnState::Active);
         assert_eq!(event.burning_for_secs, None);
+    }
+
+    #[test]
+    fn android_alert_gate_triggers_once_for_runaway() {
+        let mut gate = AndroidAlertGate::new(300);
+        let event = AgentBurnEvent {
+            state: AgentBurnState::Runaway,
+            burning_for_secs: Some(90),
+            token_rate_per_sec: 7.0,
+        };
+
+        assert!(gate.should_alert(&event, 1000));
+        assert!(!gate.should_alert(&event, 1100));
+    }
+
+    #[test]
+    fn android_alert_gate_repeats_after_cooldown() {
+        let mut gate = AndroidAlertGate::new(300);
+        let event = AgentBurnEvent {
+            state: AgentBurnState::Runaway,
+            burning_for_secs: Some(90),
+            token_rate_per_sec: 7.0,
+        };
+
+        assert!(gate.should_alert(&event, 1000));
+        assert!(gate.should_alert(&event, 1300));
+    }
+
+    #[test]
+    fn android_alert_gate_resets_after_recovery() {
+        let mut gate = AndroidAlertGate::new(300);
+        let runaway = AgentBurnEvent {
+            state: AgentBurnState::Runaway,
+            burning_for_secs: Some(90),
+            token_rate_per_sec: 7.0,
+        };
+        let recovery = AgentBurnEvent {
+            state: AgentBurnState::Recovery,
+            burning_for_secs: None,
+            token_rate_per_sec: 0.0,
+        };
+
+        assert!(gate.should_alert(&runaway, 1000));
+        assert!(!gate.should_alert(&recovery, 1010));
+        assert!(gate.should_alert(&runaway, 1020));
+    }
+
+    #[test]
+    fn android_runaway_alert_text_is_privacy_safe() {
+        let text = android_runaway_alert_text();
+        let combined = format!("{} {}", text.title, text.body).to_lowercase();
+
+        assert!(combined.contains("vimichi"));
+        assert!(combined.contains("токен"));
+        assert!(!combined.contains("api"));
+        assert!(!combined.contains("key"));
+        assert!(!combined.contains("prompt"));
+        assert!(!combined.contains("session"));
+        assert!(!combined.contains("c:\\"));
     }
 }
