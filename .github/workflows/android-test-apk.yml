@@ -49,7 +49,9 @@ jobs:
           cargo install cargo-apk --locked
 
       - name: Build guarded runner
-        run: rustc tools/guarded-run.rs -O -o target/guarded-run
+        run: |
+          mkdir -p target
+          rustc tools/guarded-run.rs -O -o target/guarded-run
 
       - name: Build APK
         run: |
