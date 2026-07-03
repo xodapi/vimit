@@ -388,6 +388,69 @@ pub struct AgentStatus {
     pub token_rate: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentActivity {
+    Active,
+    Idle,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentPulse {
+    pub activity: AgentActivity,
+    pub token_rate_known: bool,
+    pub token_rate_per_tick: f64,
+    pub token_rate_per_sec: f64,
+    pub interval_ms: u64,
+    pub sessions_total: u64,
+    pub sessions_active: u64,
+    pub max_context_pct: Option<f64>,
+}
+
+impl AgentPulse {
+    pub fn from_abtop_status(status: &Value) -> Self {
+        let interval_ms = status
+            .get("interval_ms")
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .unwrap_or(1000);
+        let token_rate = status
+            .get("token_rate")
+            .and_then(to_number)
+            .or_else(|| summed_agent_token_rate(status));
+        let token_rate_known = token_rate.is_some();
+        let token_rate_per_tick = token_rate.unwrap_or(0.0);
+        let token_rate_per_sec = token_rate_per_tick / (interval_ms as f64 / 1000.0);
+        let sessions_total = status
+            .get("sessions_total")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let sessions_active = status
+            .get("sessions_active")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let max_context_pct = max_agent_context_pct(status);
+        let activity = if sessions_active > 0 || token_rate_per_tick > 0.0 {
+            AgentActivity::Active
+        } else if sessions_total > 0 {
+            AgentActivity::Idle
+        } else {
+            AgentActivity::Unknown
+        };
+
+        Self {
+            activity,
+            token_rate_known,
+            token_rate_per_tick,
+            token_rate_per_sec,
+            interval_ms,
+            sessions_total,
+            sessions_active,
+            max_context_pct,
+        }
+    }
+}
+
 // ── API (now in api.rs) ─────────────────────────────────────────────────────
 // HttpClient, Router, fetch_me, load_mock moved to api.rs
 
@@ -646,37 +709,22 @@ pub fn read_agent_status(binary: &str) -> AgentStatus {
             token_rate: "токены/мин: нет данных abtop".to_string(),
         };
     };
-    let sessions = parsed
-        .get("sessions_total")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let active = parsed
-        .get("sessions_active")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let ctx = parsed
-        .get("agents")
-        .and_then(Value::as_array)
-        .and_then(|agents| {
-            agents
-                .iter()
-                .filter_map(|agent| agent.get("max_context_pct").and_then(to_number))
-                .fold(None, |peak: Option<f64>, value| {
-                    Some(peak.map_or(value, |peak| peak.max(value)))
-                })
-        })
+    let pulse = AgentPulse::from_abtop_status(&parsed);
+    let ctx = pulse
+        .max_context_pct
         .map(|value| format!("{value:.0}%"))
         .unwrap_or_else(|| "н/д".to_string());
-    let token_rate = parsed
-        .get("token_rate")
-        .and_then(to_number)
-        .or_else(|| summed_agent_token_rate(&parsed));
 
     AgentStatus {
-        summary: format!("агенты: сессий {sessions}, активных {active}, контекст макс. {ctx}"),
-        token_rate: token_rate
-            .map(|value| format!("токены/мин: {}", short_rate(value)))
-            .unwrap_or_else(|| "токены/мин: нет данных abtop".to_string()),
+        summary: format!(
+            "агенты: сессий {}, активных {}, контекст макс. {ctx}",
+            pulse.sessions_total, pulse.sessions_active
+        ),
+        token_rate: if pulse.token_rate_known {
+            format!("токены/мин: {}", short_rate(pulse.token_rate_per_tick))
+        } else {
+            "токены/мин: нет данных abtop".to_string()
+        },
     }
 }
 
@@ -706,6 +754,20 @@ fn summed_agent_token_rate(parsed: &Value) -> Option<f64> {
                 }
             }
             seen.then_some(total)
+        })
+}
+
+fn max_agent_context_pct(parsed: &Value) -> Option<f64> {
+    parsed
+        .get("agents")
+        .and_then(Value::as_array)
+        .and_then(|agents| {
+            agents
+                .iter()
+                .filter_map(|agent| agent.get("max_context_pct").and_then(to_number))
+                .fold(None, |peak: Option<f64>, value| {
+                    Some(peak.map_or(value, |peak| peak.max(value)))
+                })
         })
 }
 
@@ -877,5 +939,69 @@ mod tests {
 
         assert!(remember_deprecated_env_warning(&key));
         assert!(!remember_deprecated_env_warning(&key));
+    }
+
+    #[test]
+    fn agent_pulse_marks_active_and_converts_tokens_per_second() {
+        let pulse = AgentPulse::from_abtop_status(&json!({
+            "interval_ms": 2000,
+            "token_rate": 42.0,
+            "sessions_total": 2,
+            "sessions_active": 1,
+            "agents": [
+                {"agent_cli": "codex", "max_context_pct": 41.0},
+                {"agent_cli": "claude", "max_context_pct": 73.0}
+            ]
+        }));
+
+        assert_eq!(pulse.activity, AgentActivity::Active);
+        assert!(pulse.token_rate_known);
+        assert_eq!(pulse.token_rate_per_tick, 42.0);
+        assert_eq!(pulse.token_rate_per_sec, 21.0);
+        assert_eq!(pulse.sessions_total, 2);
+        assert_eq!(pulse.sessions_active, 1);
+        assert_eq!(pulse.max_context_pct, Some(73.0));
+    }
+
+    #[test]
+    fn agent_pulse_marks_idle_when_sessions_wait_without_rate() {
+        let pulse = AgentPulse::from_abtop_status(&json!({
+            "interval_ms": 2000,
+            "token_rate": 0.0,
+            "sessions_total": 1,
+            "sessions_active": 0
+        }));
+
+        assert_eq!(pulse.activity, AgentActivity::Idle);
+        assert!(pulse.token_rate_known);
+        assert_eq!(pulse.token_rate_per_sec, 0.0);
+    }
+
+    #[test]
+    fn agent_pulse_uses_agent_rate_fallback() {
+        let pulse = AgentPulse::from_abtop_status(&json!({
+            "interval_ms": 1000,
+            "sessions_total": 2,
+            "sessions_active": 0,
+            "agents": [
+                {"agent_cli": "codex", "token_rate": 5.5},
+                {"agent_cli": "claude", "token_rate": 2.5}
+            ]
+        }));
+
+        assert_eq!(pulse.activity, AgentActivity::Active);
+        assert!(pulse.token_rate_known);
+        assert_eq!(pulse.token_rate_per_tick, 8.0);
+        assert_eq!(pulse.token_rate_per_sec, 8.0);
+    }
+
+    #[test]
+    fn agent_pulse_marks_unknown_without_sessions_or_rate() {
+        let pulse = AgentPulse::from_abtop_status(&json!({}));
+
+        assert_eq!(pulse.activity, AgentActivity::Unknown);
+        assert!(!pulse.token_rate_known);
+        assert_eq!(pulse.interval_ms, 1000);
+        assert_eq!(pulse.token_rate_per_tick, 0.0);
     }
 }
