@@ -453,7 +453,7 @@ impl AgentPulse {
 
 pub const DEFAULT_STUCK_BURN_MIN_RATE_PER_SEC: f64 = 0.1;
 pub const DEFAULT_STUCK_BURN_TIMEOUT_SECS: u64 = 90;
-pub const DEFAULT_ANDROID_ALERT_COOLDOWN_SECS: u64 = 300;
+pub const DEFAULT_ANDROID_ALERT_COOLDOWN_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentBurnState {
@@ -562,6 +562,61 @@ pub fn android_runaway_alert_text() -> AndroidAlertText {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AndroidBurnUiState {
+    pub visible: bool,
+    pub level: &'static str,
+    pub text: &'static str,
+    pub creature_state: &'static str,
+    pub delta_level: &'static str,
+    pub delta_text: &'static str,
+}
+
+pub fn android_burn_ui_state(event: &AgentBurnEvent) -> AndroidBurnUiState {
+    match event.state {
+        AgentBurnState::Runaway => AndroidBurnUiState {
+            visible: true,
+            level: "danger",
+            text: "Vimichi: тревога, токены горят",
+            creature_state: "critical",
+            delta_level: "danger",
+            delta_text: "токены горят",
+        },
+        AgentBurnState::Active => AndroidBurnUiState {
+            visible: false,
+            level: "ok",
+            text: "",
+            creature_state: "awake",
+            delta_level: "ok",
+            delta_text: "агент работает",
+        },
+        AgentBurnState::Recovery => AndroidBurnUiState {
+            visible: false,
+            level: "ok",
+            text: "",
+            creature_state: "recovery",
+            delta_level: "ok",
+            delta_text: "расход остановлен",
+        },
+        AgentBurnState::Idle => AndroidBurnUiState {
+            visible: false,
+            level: "ok",
+            text: "",
+            creature_state: "sleeping",
+            delta_level: "ok",
+            delta_text: "агент простаивает",
+        },
+        AgentBurnState::Unknown => AndroidBurnUiState {
+            visible: false,
+            level: "unknown",
+            text: "",
+            creature_state: "awake",
+            delta_level: "ok",
+            delta_text: "нет данных",
+        },
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AndroidAlertGate {
     cooldown_secs: u64,
     last_alert_secs: Option<u64>,
@@ -624,6 +679,28 @@ impl AndroidAlertBridge {
         android_show_notification(&self.app, &text)?;
         Ok(true)
     }
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+pub fn android_handle_burn_event(
+    app: &AppWindow,
+    bridge: &AndroidAlertBridge,
+    event: &AgentBurnEvent,
+    now_secs: u64,
+) -> Result<bool, String> {
+    android_apply_burn_ui_state(app, event);
+    bridge.alert_runaway(event, now_secs)
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_apply_burn_ui_state(app: &AppWindow, event: &AgentBurnEvent) {
+    let state = android_burn_ui_state(event);
+    app.set_agent_alert_visible(state.visible);
+    app.set_agent_alert_level(state.level.into());
+    app.set_agent_alert_text(state.text.into());
+    app.set_overlay_creature_state(state.creature_state.into());
+    app.set_overlay_delta_level(state.delta_level.into());
+    app.set_overlay_delta_text(state.delta_text.into());
 }
 
 #[cfg(all(target_os = "android", feature = "android-gui"))]
@@ -1522,5 +1599,51 @@ mod tests {
         assert!(!combined.contains("prompt"));
         assert!(!combined.contains("session"));
         assert!(!combined.contains("c:\\"));
+    }
+
+    #[test]
+    fn android_burn_ui_state_marks_runaway_as_vimichi_alarm() {
+        let event = AgentBurnEvent {
+            state: AgentBurnState::Runaway,
+            burning_for_secs: Some(90),
+            token_rate_per_sec: 12.0,
+        };
+
+        let state = android_burn_ui_state(&event);
+
+        assert!(state.visible);
+        assert_eq!(state.level, "danger");
+        assert_eq!(state.text, "Vimichi: тревога, токены горят");
+        assert_eq!(state.creature_state, "critical");
+        assert_eq!(state.delta_level, "danger");
+    }
+
+    #[test]
+    fn android_burn_ui_state_resets_after_recovery() {
+        let event = AgentBurnEvent {
+            state: AgentBurnState::Recovery,
+            burning_for_secs: None,
+            token_rate_per_sec: 0.0,
+        };
+
+        let state = android_burn_ui_state(&event);
+
+        assert!(!state.visible);
+        assert_eq!(state.creature_state, "recovery");
+        assert_eq!(state.delta_text, "расход остановлен");
+    }
+
+    #[test]
+    fn android_alert_gate_default_uses_one_minute_cooldown() {
+        let mut gate = AndroidAlertGate::default();
+        let event = AgentBurnEvent {
+            state: AgentBurnState::Runaway,
+            burning_for_secs: Some(90),
+            token_rate_per_sec: 7.0,
+        };
+
+        assert!(gate.should_alert(&event, 1000));
+        assert!(!gate.should_alert(&event, 1059));
+        assert!(gate.should_alert(&event, 1060));
     }
 }

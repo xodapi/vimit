@@ -64,9 +64,15 @@ runaway token burn events:
 - prompt text, paths, session IDs, tool arguments, and API keys are never
   included in notifications;
 - repeated runaway events are debounced by `AndroidAlertGate`;
+- runaway events set Vimichi into a visible alarm state in the Android UI;
+- idle/recovery events clear the alarm state;
 - Android 8+ receives a `vimit-agent-alerts` notification channel;
 - Android 13+ still requires the user to grant notification permission at
   runtime before notifications are visible.
 
 Runtime permission UX for Android 13+ should be implemented as a separate
 Android task before relying on notifications as the only alert channel.
+
+The Android alert bridge consumes `AgentBurnEvent` from the shared core
+detector. The foreground/background polling source for those events is tracked
+as a separate Android task.
