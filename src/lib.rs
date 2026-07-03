@@ -219,6 +219,7 @@ fn android_apply_dashboard(
                 "30d",
                 windows.iter().find(|window| window.key == "30d"),
             );
+            android_apply_vimichi(app, &windows);
         }
         Err(error) => {
             let msg = if error.contains("HTTP 401") {
@@ -230,6 +231,42 @@ fn android_apply_dashboard(
             app.set_status_text(msg.into());
         }
     }
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_apply_vimichi(app: &AppWindow, windows: &[WindowState]) {
+    let five = windows.iter().find(|window| window.key == "5h");
+    let percent = five.map(|window| window.percent).unwrap_or(0.0);
+    let peak = five
+        .and_then(|window| peak_percent(window.credits.as_ref(), window.requests.as_ref()))
+        .unwrap_or(percent);
+    let level = window_level_from_peak(peak);
+    let state = android_vimichi_state(percent, level);
+    let phase = ((percent.clamp(0.0, 100.0) as f32) * 3.6) % 360.0;
+
+    app.set_overlay_delta_level(level.into());
+    app.set_overlay_creature_percent(percent as f32);
+    app.set_overlay_creature_state(state.into());
+    app.set_overlay_creature_points(android_vimichi_points(percent));
+    app.set_overlay_pulse_phase(phase);
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_vimichi_state(percent: f64, level: &str) -> &'static str {
+    if percent < 15.0 {
+        "sleeping"
+    } else if level == "danger" {
+        "critical"
+    } else if level == "warning" {
+        "alert"
+    } else {
+        "awake"
+    }
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_vimichi_points(percent: f64) -> i32 {
+    (8.0 + percent.clamp(0.0, 100.0) * 0.56).round() as i32
 }
 
 #[cfg(all(target_os = "android", feature = "android-gui"))]

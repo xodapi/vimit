@@ -1069,6 +1069,53 @@ export component AppWindow inherits Window {
 }
             }
 
+            if (root.is-android) : Rectangle {
+                min-height: 142px;
+                background: Theme.bg-card;
+                border-radius: 10px;
+                border-color: Theme.border;
+                border-width: 1px;
+
+                HorizontalLayout {
+                    padding: 14px;
+                    spacing: 14px;
+                    alignment: center;
+
+                    PulseOrganism {
+                        level: root.overlay-delta-level;
+                        creature-state: root.overlay-creature-state;
+                        phase: root.overlay-pulse-phase;
+                        commands: root.overlay-creature-path;
+                        node-count: root.overlay-creature-points;
+                    }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        alignment: center;
+
+                        Text {
+                            text: "Vimichi";
+                            color: Theme.text-primary;
+                            font-size: 20px;
+                            font-weight: 900;
+                        }
+
+                        Text {
+                            text: root.overlay-creature-state == "sleeping" ? "спит, расход тихий" : root.overlay-creature-state == "alert" ? "насторожен, лимит близко" : root.overlay-creature-state == "critical" ? "тревога, лимит горит" : "бодрствует";
+                            color: root.overlay-delta-level == "danger" ? #f85149 : root.overlay-delta-level == "warning" ? #d29922 : Theme.text-muted;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+
+                        Text {
+                            text: root.stealth-mode ? "***" : "5h: \{round(root.overlay-creature-percent)}%";
+                            color: Theme.text-muted;
+                            font-size: 12px;
+                        }
+                    }
+                }
+            }
+
             GridLayout {
                 spacing: 14px;
 
