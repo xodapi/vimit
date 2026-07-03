@@ -465,6 +465,9 @@ export component AppWindow inherits Window {
     in property <string> source-text: "источник: загрузка";
     in property <string> agent-text: "агенты: нет данных";
     in property <string> token-rate-text: "токены/мин: нет данных";
+    in property <bool> agent-alert-visible: false;
+    in property <string> agent-alert-level: "ok";
+    in property <string> agent-alert-text: "";
     in property <string> footer-text: ".env: текущая папка, затем рядом с exe";
     in-out property <bool> settings-open: false;
     in-out property <int> period-mode: 0;
@@ -638,6 +641,22 @@ export component AppWindow inherits Window {
                             color: #c8b56b;
                             font-size: 14px;
                             font-weight: 600;
+                        }
+
+                        if (root.agent-alert-visible) : Rectangle {
+                            height: 34px;
+                            background: root.agent-alert-level == "danger" ? Theme.danger : Theme.warning;
+                            border-radius: 8px;
+
+                            Text {
+                                text: root.agent-alert-text;
+                                color: #ffffff;
+                                font-size: 13px;
+                                font-weight: 800;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                wrap: word-wrap;
+                            }
                         }
 
                         if (!root.is-android) : HorizontalLayout {
