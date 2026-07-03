@@ -53,3 +53,20 @@ to the user and compliant with Android background execution limits.
 3. Validate a demo APK on a device or emulator.
 4. Add notification/widget mode.
 5. Only then test optional native overlay permission flow.
+
+## Agent burn alerts
+
+The Android build declares `INTERNET`, `VIBRATE`, and `POST_NOTIFICATIONS`.
+`src/lib.rs` exposes an Android-gated notification/vibration bridge for
+runaway token burn events:
+
+- alert text is fixed and privacy-safe;
+- prompt text, paths, session IDs, tool arguments, and API keys are never
+  included in notifications;
+- repeated runaway events are debounced by `AndroidAlertGate`;
+- Android 8+ receives a `vimit-agent-alerts` notification channel;
+- Android 13+ still requires the user to grant notification permission at
+  runtime before notifications are visible.
+
+Runtime permission UX for Android 13+ should be implemented as a separate
+Android task before relying on notifications as the only alert channel.
