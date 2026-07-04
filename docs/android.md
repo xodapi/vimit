@@ -43,14 +43,104 @@ blocked or hidden by sensitive apps. A stable production design likely also
 needs a foreground service or notification entry point so polling is transparent
 to the user and compliant with Android background execution limits.
 
+## Foreground polling plan
+
+Current Android support is an in-app Slint Activity that refreshes quota data
+only while the screen is open. That path is useful for manual checks, but it is
+not a compliant background polling solution for Android alerts.
+
+The recommended background design is:
+
+1. Keep quota fetch and parsing in shared Rust code.
+2. Add a small Android-native foreground service entrypoint that owns the
+   polling timer and lifecycle.
+3. Let that service call a Rust helper that returns a privacy-safe quota
+   summary for alerts.
+4. Route alert delivery through a notification/vibration bridge owned by the
+   Android layer.
+5. Re-open the Slint Activity only for richer drill-down UI, not for the
+   background timer itself.
+
+This split keeps Android lifecycle responsibilities where Android expects them:
+service startup, foreground notification, wake policy, retry scheduling, and
+notification channels should stay in the Android integration layer, while Rust
+continues to own `/v1/me` fetch, threshold evaluation, failover, and creature
+state calculation.
+
+## Service contract
+
+The planned foreground service should exchange only minimal, privacy-safe data
+with Rust:
+
+- input: API key from existing secure local storage, poll interval, threshold
+  configuration, demo/live flag
+- output: worst level, affected quota window, percent used, reset countdown,
+  endpoint label, and whether notification/vibration should fire
+
+The service should not log API keys, raw `/v1/me` payloads, task titles, agent
+session names, or other private workflow content. Foreground notification text
+should stay generic, for example "VibeMode warning in 5h window", and vibration
+should be keyed off alert level only.
+
+## Notification and vibration bridge
+
+The existing desktop notification code is not an Android implementation. The
+Android path should expose a dedicated bridge that can be invoked from the
+foreground polling service with a compact alert payload:
+
+- `level`: `warning`, `danger`, or `recovery`
+- `window_key`: `5h`, `24h`, `7d`, or `30d`
+- `percent_used`: rounded numeric summary
+- `reset_text`: already formatted countdown string
+
+That bridge can then decide:
+
+- which Android notification channel to use
+- whether vibration is allowed and appropriate
+- how to debounce repeated notifications
+- whether tapping the notification opens the Slint Activity
+
+## Manifest and Android constraints
+
+The eventual implementation will likely require Android manifest metadata beyond
+the current `INTERNET` permission, including foreground-service support and a
+user-visible persistent notification while polling is active. Exact manifest
+entries depend on the chosen Android service wrapper and should be added only
+when the native integration layer is implemented.
+
+Important Android limitations to preserve:
+
+- background polling must not depend on the Slint Activity staying open
+- foreground polling must always show a visible ongoing notification
+- retries should tolerate process death and Activity recreation
+- the service must avoid aggressive wakeups that look like stealth telemetry
+- alert content must remain privacy-safe on the lock screen
+
+## Current blocker
+
+The repository currently has Android-gated Rust UI code in `src/lib.rs`, but it
+does not yet contain the Android-native service/lifecycle layer needed to host a
+true foreground polling service. Implementing that safely likely requires a
+dedicated Android integration step around `android-activity`/manifest/service
+wiring rather than a Rust-only patch inside the existing Slint Activity.
+
+Because of that, the current issue is treated as a concrete implementation
+plan and blocker record:
+
+- shared Rust quota logic is reusable as-is
+- foreground polling should be hosted by an Android-native service layer
+- notification/vibration should be triggered through an Android bridge
+- overlay work should wait until foreground polling is proven on device
+
 ## Acceptance path
 
 1. Install Android SDK/NDK, `cargo-apk` or `cargo-ndk`, and
    `aarch64-linux-android` Rust target.
-2. Add a minimal Android entrypoint that calls the shared quota/creature model
-   and renders a compact Slint view.
-3. Validate a demo APK on a device or emulator.
-4. Add notification/widget mode.
+2. Keep the current Slint Activity for manual/live inspection and settings.
+3. Add a foreground service entrypoint that polls through shared Rust quota
+   logic and posts privacy-safe Android notifications.
+4. Validate service lifecycle, notification delivery, and vibration behavior on
+   a device or emulator.
 5. Only then test optional native overlay permission flow.
 
 ## Manual test APK
