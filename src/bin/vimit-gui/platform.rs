@@ -11,12 +11,13 @@ use crate::ng;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+#[cfg(windows)]
 pub(crate) fn suppress_windows_console(command: &mut Command) {
-    #[cfg(windows)]
-    {
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    command.creation_flags(CREATE_NO_WINDOW);
 }
+
+#[cfg(not(windows))]
+pub(crate) fn suppress_windows_console(_command: &mut Command) {}
 
 pub(crate) fn spawn_mini_overlay(force_demo: bool) -> Result<(), String> {
     let current =
