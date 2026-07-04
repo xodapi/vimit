@@ -153,7 +153,7 @@ fn draw_header(
             } else {
                 "OK"
             };
-            let stale_tag = if s.stale { " STALE" } else { "" };
+            let stale_tag = if s.stale { " STALE-CACHE" } else { "" };
             let latency_tag = if s.latency_ms > 0 {
                 format!(" {}ms", s.latency_ms)
             } else {
@@ -170,7 +170,7 @@ fn draw_header(
             let mut final_style = pal.bold_level_style(level);
 
             if let Some(min) = s.offline_duration_min {
-                title = format!(" ⚠ API offline {min}m ");
+                title.push_str(&format!("| API offline {min}m "));
                 final_style = pal.danger.into();
             }
 

@@ -190,6 +190,7 @@ impl VimitMcpServer {
             snapshot.stale,
             snapshot.latency_ms,
             &snapshot.api_endpoint,
+            snapshot.offline_duration_min,
         );
         if let Some(map) = status.as_object_mut() {
             map.insert(

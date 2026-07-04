@@ -28,6 +28,7 @@ pub fn run_once(
         snapshot.stale,
         snapshot.latency_ms,
         &snapshot.api_endpoint,
+        snapshot.offline_duration_min,
     );
 
     match args.output {
@@ -41,11 +42,15 @@ pub fn run_once(
         OutputMode::Compact => print_compact(
             &snapshot.windows,
             snapshot.abtop.as_ref(),
+            snapshot.stale,
             snapshot.offline_duration_min,
         ),
-        OutputMode::Human => {
-            print_human(&snapshot.windows, snapshot.abtop.as_ref(), snapshot.stale)
-        }
+        OutputMode::Human => print_human(
+            &snapshot.windows,
+            snapshot.abtop.as_ref(),
+            snapshot.stale,
+            snapshot.offline_duration_min,
+        ),
     }
 
     notifier.check_windows(&snapshot.windows);
@@ -76,9 +81,13 @@ fn color_percent(percent: f64) -> String {
     format!("\x1b[{code}m{:.0}%\x1b[0m", percent)
 }
 
-pub fn print_human(windows: &[ng::WindowState], abtop: Option<&Value>, stale: bool) {
-    let tag = if stale { " (cached)" } else { "" };
-    println!("VibeMode limits{tag}");
+pub fn print_human(
+    windows: &[ng::WindowState],
+    abtop: Option<&Value>,
+    stale: bool,
+    offline_min: Option<u64>,
+) {
+    println!("VibeMode limits{}", human_status_suffix(stale, offline_min));
     if windows.is_empty() {
         println!("  usage rows not found in /v1/me response");
     }
@@ -114,8 +123,16 @@ pub fn print_human(windows: &[ng::WindowState], abtop: Option<&Value>, stale: bo
     }
 }
 
-pub fn print_compact(windows: &[ng::WindowState], abtop: Option<&Value>, offline_min: Option<u64>) {
+pub fn print_compact(
+    windows: &[ng::WindowState],
+    abtop: Option<&Value>,
+    stale: bool,
+    offline_min: Option<u64>,
+) {
     let mut parts = vec!["NG".to_string()];
+    if stale {
+        parts.push("stale-cache".to_string());
+    }
     if let Some(min) = offline_min {
         parts.push(format!("offline:{}m", min));
     }
@@ -139,6 +156,15 @@ pub fn print_compact(windows: &[ng::WindowState], abtop: Option<&Value>, offline
         }
     }
     println!("{}", parts.join(" "));
+}
+
+fn human_status_suffix(stale: bool, offline_min: Option<u64>) -> String {
+    match (stale, offline_min) {
+        (true, Some(min)) => format!(" (stale cache; API offline {min}m)"),
+        (true, None) => " (stale cache)".to_string(),
+        (false, Some(min)) => format!(" (API offline {min}m)"),
+        (false, None) => String::new(),
+    }
 }
 
 fn format_agent(agent: &Value) -> String {
@@ -321,5 +347,16 @@ mod tests {
         let escaped = escape_github_annotation("danger 95%\nnext\rline");
 
         assert_eq!(escaped, "danger 95%25%0Anext%0Dline");
+    }
+
+    #[test]
+    fn human_status_suffix_separates_stale_and_offline() {
+        assert_eq!(human_status_suffix(false, None), "");
+        assert_eq!(human_status_suffix(true, None), " (stale cache)");
+        assert_eq!(human_status_suffix(false, Some(3)), " (API offline 3m)");
+        assert_eq!(
+            human_status_suffix(true, Some(3)),
+            " (stale cache; API offline 3m)"
+        );
     }
 }
