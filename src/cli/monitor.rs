@@ -1575,6 +1575,74 @@ mod tests {
         }
     }
 
+    fn agent_stuck_snapshot() -> StatusSnapshot {
+        let mut snapshot = test_snapshot();
+        snapshot.abtop = Some(serde_json::json!({
+            "token_rate": 128.4,
+            "sessions_total": 4,
+            "sessions_active": 1,
+            "agents": [
+                {
+                    "agent_cli": "codex",
+                    "sessions": 3,
+                    "active": 1,
+                    "waiting": 2,
+                    "total_tokens": 18500,
+                    "active_tokens": 9200,
+                    "max_context_pct": 88.0,
+                    "max_turn_count": 54
+                },
+                {
+                    "agent_cli": "claude",
+                    "sessions": 1,
+                    "active": 0,
+                    "waiting": 1,
+                    "total_tokens": 2400,
+                    "active_tokens": 0,
+                    "max_context_pct": 12.0,
+                    "max_turn_count": 8
+                }
+            ]
+        }));
+        snapshot
+    }
+
+    fn reset_edge_snapshot() -> StatusSnapshot {
+        let mut snapshot = test_snapshot();
+        snapshot.windows = vec![
+            ng::WindowState {
+                key: "5h",
+                level: "ok".to_string(),
+                reset: "sync pending".to_string(),
+                reset_in_seconds: None,
+                credits: Some(ng::Metric {
+                    used: 20.0,
+                    limit: 100.0,
+                    remaining: 80.0,
+                    percent: 20.0,
+                }),
+                requests: None,
+                percent: 20.0,
+            },
+            ng::WindowState {
+                key: "24h",
+                level: "warning".to_string(),
+                reset: "manual review".to_string(),
+                reset_in_seconds: Some(600),
+                credits: None,
+                requests: Some(ng::Metric {
+                    used: 87.0,
+                    limit: 100.0,
+                    remaining: 13.0,
+                    percent: 87.0,
+                }),
+                percent: 87.0,
+            },
+        ];
+        snapshot.abtop = None;
+        snapshot
+    }
+
     #[test]
     fn monitor_output_has_dashboard_sections() {
         let snapshot = test_snapshot();
@@ -1653,6 +1721,56 @@ mod tests {
             width,
             height,
         )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_tui_to_string_with_context(
+        snapshot: Option<&StatusSnapshot>,
+        error: Option<&str>,
+        interval_secs: u64,
+        next_refresh_secs: u64,
+        with_abtop: bool,
+        warning_threshold: f64,
+        window_history: &HashMap<&str, WindowHistory>,
+        preset: Preset,
+        width: u16,
+        height: u16,
+        panels: PanelState,
+        trend_days: &[TrendDay],
+    ) -> String {
+        use ratatui::backend::TestBackend;
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                draw_frame(
+                    frame,
+                    snapshot,
+                    error,
+                    interval_secs,
+                    next_refresh_secs,
+                    with_abtop,
+                    warning_threshold,
+                    window_history,
+                    preset,
+                    Theme::Btop,
+                    &panels,
+                    &[],
+                    0,
+                    trend_days,
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut out = String::new();
+        for y in 0..height {
+            for x in 0..width {
+                let cell = &buffer[(x, y)];
+                out.push_str(cell.symbol());
+            }
+            out.push('\n');
+        }
+        out
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1882,6 +2000,52 @@ mod tests {
             Theme::HighContrast,
             120,
             40,
+        );
+        insta::assert_snapshot!(output);
+    }
+
+    #[test]
+    fn tui_snapshot_agent_stuck_state() {
+        let snapshot = agent_stuck_snapshot();
+        let history = HashMap::new();
+
+        let output = render_tui_to_string(
+            Some(&snapshot),
+            None,
+            5,
+            1,
+            true,
+            75.0,
+            &history,
+            Preset::Full,
+            120,
+            40,
+        );
+        insta::assert_snapshot!(output);
+    }
+
+    #[test]
+    fn tui_snapshot_reset_edge_with_empty_trends() {
+        let snapshot = reset_edge_snapshot();
+        let history = HashMap::new();
+        let panels = PanelState {
+            show_trends: true,
+            ..PanelState::default()
+        };
+
+        let output = render_tui_to_string_with_context(
+            Some(&snapshot),
+            None,
+            5,
+            4,
+            true,
+            75.0,
+            &history,
+            Preset::Full,
+            120,
+            40,
+            panels,
+            &[],
         );
         insta::assert_snapshot!(output);
     }
