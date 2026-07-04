@@ -1,9 +1,19 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+
+static CLI_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn cli_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    CLI_TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("cli integration test lock should not be poisoned")
+}
 
 struct TestHome {
     root: PathBuf,
@@ -77,6 +87,7 @@ fn stdout_json(output: &std::process::Output) -> Value {
 
 #[test]
 fn demo_json_runs_real_cli_binary() {
+    let _lock = cli_test_lock();
     let test_home = TestHome::new();
     let output = test_home
         .command()
@@ -102,6 +113,7 @@ fn demo_json_runs_real_cli_binary() {
 
 #[test]
 fn mock_json_runs_real_cli_binary() {
+    let _lock = cli_test_lock();
     let test_home = TestHome::new();
     let fixture = fixture_path("tests/fixtures/me.json");
     let output = test_home
@@ -124,6 +136,7 @@ fn mock_json_runs_real_cli_binary() {
 
 #[test]
 fn invalid_args_return_error_from_cli() {
+    let _lock = cli_test_lock();
     let test_home = TestHome::new();
     let fixture = fixture_path("tests/fixtures/me.json");
     let output = test_home
@@ -140,6 +153,7 @@ fn invalid_args_return_error_from_cli() {
 
 #[test]
 fn cli_output_does_not_leak_api_keys() {
+    let _lock = cli_test_lock();
     let test_home = TestHome::new();
     let fixture = fixture_path("tests/fixtures/me.json");
     let secret = "vm_test_secret_123456789";
