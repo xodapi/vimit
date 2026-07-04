@@ -90,6 +90,19 @@ work.
 This is intentionally not a GitHub Release. Release tags and production
 release assets stay under the existing release workflow.
 
+## CI Android library check
+
+The main CI workflow installs the `aarch64-linux-android` Rust target and runs:
+
+```bash
+cargo check --locked --features android-gui --target aarch64-linux-android --lib
+```
+
+This is a fast compile guard for Android-gated Rust code. It does not install
+or run the APK, does not require API keys, and does not replace the manual APK
+artifact/device test above. Use the `Android Test APK` workflow when a change
+needs manifest, packaging, or real-device validation.
+
 ## Agent burn alerts
 
 The Android build declares `INTERNET`, `VIBRATE`, and `POST_NOTIFICATIONS`.
