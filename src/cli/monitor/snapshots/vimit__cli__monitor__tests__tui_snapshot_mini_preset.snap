@@ -1,5 +1,5 @@
 ---
-source: src/cli/monitor.rs
+source: src/cli/monitor/tests.rs
 expression: output
 ---
 ┌──────────────────────────────────────────────────────────┐
