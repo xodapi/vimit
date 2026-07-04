@@ -274,6 +274,7 @@ fn merge_args_with_config(args: Args, merged: &MergedConfig) -> Args {
         },
         with_abtop: args.with_abtop || merged.with_abtop,
         notify: args.notify || merged.notify,
+        ci_annotate: args.ci_annotate,
         watch: if args.watch == 0 && merged.watch != 0 {
             merged.watch
         } else {
