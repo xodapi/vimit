@@ -1,5 +1,6 @@
 use crate as vimit;
 use std::io::{self, Write};
+use std::path::Path;
 
 use super::config::dirs_or_default;
 
@@ -79,7 +80,7 @@ pub fn run_init() -> Result<i32, String> {
                 let env_content = format!(
                     "VIBEMODE_API_KEY={key}\n# VIBEMODE_API_BASE=https://r-api.vibemod.pro\n"
                 );
-                std::fs::write(&env_file, env_content)
+                write_secret_env_file(&env_file, env_content.as_bytes())
                     .map_err(|e| format!("cannot write .env: {e}"))?;
                 println!("  .env created with VIBEMODE_API_KEY");
                 println!("  hint: you can also set the env var directly or use --api-key-env");
@@ -130,5 +131,62 @@ fn test_connection() -> Result<(), String> {
             println!("  hint: check your API key and network");
             Ok(())
         }
+    }
+}
+
+fn write_secret_env_file(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options.open(path)?;
+    file.write_all(content)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_secret_env_file;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn secret_env_file_uses_create_new() {
+        let path = std::env::temp_dir().join(format!(
+            "vimit-init-create-new-{}.env",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        write_secret_env_file(&path, b"VIBEMODE_API_KEY=test\n").unwrap();
+        let err = write_secret_env_file(&path, b"VIBEMODE_API_KEY=other\n").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn secret_env_file_is_owner_only_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = std::env::temp_dir().join(format!(
+            "vimit-init-owner-only-{}.env",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        write_secret_env_file(&path, b"VIBEMODE_API_KEY=test\n").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_file(path);
     }
 }
