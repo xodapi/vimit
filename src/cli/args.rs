@@ -54,6 +54,7 @@ pub struct Args {
     pub vpn: bool,
     pub auto_failover: bool,
     pub no_cache: bool,
+    pub cache_ttl_secs: u64,
     pub trend: bool,
     pub trend_days: u64,
     pub update: bool,
@@ -95,6 +96,7 @@ where
         vpn: false,
         auto_failover: true,
         no_cache: false,
+        cache_ttl_secs: super::cache::DEFAULT_TTL_SECS,
         trend: false,
         trend_days: 30,
         update: false,
@@ -338,6 +340,7 @@ OPTIONS:
       --api-key-env <NAME>   API key environment variable [default: VIBEMODE_API_KEY]
       --vpn                  Switch to fallback endpoint (r-api.vibemod.pro)
       --no-failover          Disable automatic api/r-api endpoint failover
+      --no-cache             Always fetch live data; do not read or write API cache
   -V, --version              Print version
   -h, --help                 Print help
 
@@ -382,6 +385,13 @@ mod tests {
     fn no_failover_disables_auto_endpoint_switching() {
         let args = parse_args(["--no-failover".to_string()]).unwrap();
         assert!(!args.auto_failover);
+    }
+
+    #[test]
+    fn no_cache_flag_is_parsed() {
+        let args = parse_args(["--no-cache".to_string()]).unwrap();
+        assert!(args.no_cache);
+        assert_eq!(args.cache_ttl_secs, crate::cli::cache::DEFAULT_TTL_SECS);
     }
 
     #[test]

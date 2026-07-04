@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("api_cache");
-const DEFAULT_TTL_SECS: u64 = 30;
+pub const DEFAULT_TTL_SECS: u64 = 30;
 
 pub struct CacheEntry {
     pub cache_key: String,
@@ -43,7 +43,6 @@ impl CacheStore {
         }))
     }
 
-    #[allow(dead_code)]
     pub fn set_ttl(&mut self, secs: u64) {
         self.ttl = Duration::from_secs(secs);
     }
@@ -62,7 +61,7 @@ impl CacheStore {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let age_secs = now_secs.saturating_sub(cached_at_secs);
-        if Duration::from_secs(age_secs) > self.ttl {
+        if self.ttl.is_zero() || Duration::from_secs(age_secs) > self.ttl {
             return None;
         }
         let payload = parsed.get("payload")?.clone();
@@ -116,7 +115,6 @@ impl CacheStore {
         tx.commit().map_err(|e| format!("cache commit failed: {e}"))
     }
 
-    #[allow(dead_code)]
     pub fn ttl(&self) -> Duration {
         self.ttl
     }

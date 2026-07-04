@@ -26,6 +26,7 @@ pub struct Config {
     pub danger: Option<f64>,
     pub threshold: Option<String>,
     pub auto_failover: Option<bool>,
+    pub cache_ttl_secs: Option<u64>,
 }
 
 impl Config {
@@ -120,6 +121,9 @@ impl Config {
             danger_threshold: self.danger(),
             window_thresholds: self.window_thresholds()?,
             auto_failover: self.auto_failover.unwrap_or(true),
+            cache_ttl_secs: self
+                .cache_ttl_secs
+                .unwrap_or(super::cache::DEFAULT_TTL_SECS),
         })
     }
 }
@@ -141,6 +145,7 @@ pub struct MergedConfig {
     pub danger_threshold: f64,
     pub window_thresholds: HashMap<String, (f64, f64)>,
     pub auto_failover: bool,
+    pub cache_ttl_secs: u64,
 }
 
 fn default_config_path() -> Option<PathBuf> {
@@ -194,6 +199,7 @@ mod tests {
             preset = "compact"
             notify = true
             fail_on = "warning"
+            cache_ttl_secs = 120
         "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.theme(), Theme::Dracula);
@@ -204,6 +210,7 @@ mod tests {
         assert!(matches!(config.preset(), Preset::Compact));
         assert_eq!(config.notify, Some(true));
         assert_eq!(config.fail_on(), FailOn::Warning);
+        assert_eq!(config.cache_ttl_secs, Some(120));
     }
 
     #[test]
@@ -246,6 +253,7 @@ mod tests {
         assert!(!merged.demo);
         assert!(!merged.monitor);
         assert!(merged.auto_failover);
+        assert_eq!(merged.cache_ttl_secs, super::super::cache::DEFAULT_TTL_SECS);
     }
 
     #[test]

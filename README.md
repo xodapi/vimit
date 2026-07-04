@@ -277,6 +277,15 @@ It renders an abtop-style dashboard with VibeMode quota windows, warning
 alerts, reset timers, remaining credits/requests, and optional local
 Codex/Claude agent context from `abtop --status-json`.
 
+API cache behavior:
+
+- Successful live `/v1/me` responses are cached for 30 seconds by default.
+- Set `cache_ttl_secs = 120` in `config.toml` to change the cache TTL.
+- `--no-cache` always performs a live fetch and does not read or write the API
+  cache, including stale fallback.
+- In monitor mode, pressing `r` clears the current account/endpoint cache entry
+  before forcing the next refresh.
+
 Desktop notifications:
 
 ```bash
