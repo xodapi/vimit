@@ -118,6 +118,10 @@ fn real_main() -> Result<i32, String> {
         return cli::init::run_init();
     }
 
+    if cli_args.mcp {
+        return cli::mcp::run_mcp();
+    }
+
     let mut merged = config.merge_with_defaults()?;
     if let Some(ref account_name) = cli_args.account {
         let account = accounts.resolve(account_name)?;
@@ -311,6 +315,7 @@ fn merge_args_with_config(args: Args, merged: &MergedConfig) -> Args {
         list_accounts: args.list_accounts,
         doctor: args.doctor,
         init: args.init,
+        mcp: args.mcp,
         vpn: args.vpn,
         auto_failover: args.auto_failover && merged.auto_failover,
         no_cache: args.no_cache,
