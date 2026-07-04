@@ -1,4 +1,4 @@
-import { Button, ComboBox, CheckBox, LineEdit } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 
 component MeterBar inherits Rectangle {
@@ -31,6 +31,7 @@ component LimitCard inherits Rectangle {
     in property <float> request-percent;
     in property <[float]> trend-data;
     in property <bool> stealth-mode;
+    in property <bool> compact: false;
 
     in property <bool> dimmed: false;
     visible: root.level != "unknown";
@@ -42,7 +43,7 @@ component LimitCard inherits Rectangle {
     border-color: root.dimmed ? Theme.border : Theme.border;
     border-width: 1px;
     border-radius: 8px;
-    min-height: 210px;
+    min-height: root.compact ? 186px : 210px;
 
     VerticalLayout {
         padding: 12px;
@@ -53,22 +54,22 @@ component LimitCard inherits Rectangle {
             Text {
                 text: root.name;
                 color: Theme.text-primary;
-                font-size: 26px;
+                font-size: root.compact ? 22px : 26px;
                 font-weight: 700;
             }
 
             Rectangle { }
 
             Rectangle {
-                width: 92px;
-                height: 28px;
+                width: root.compact ? 82px : 92px;
+                height: root.compact ? 26px : 28px;
                 border-radius: 14px;
                 background: root.accent;
 
                 Text {
                     text: root.level;
                     color: #11141a;
-                    font-size: 14px;
+                    font-size: root.compact ? 13px : 14px;
                     font-weight: 700;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -98,7 +99,7 @@ component LimitCard inherits Rectangle {
         Text {
             text: root.percent-text;
             color: root.accent;
-            font-size: 44px;
+            font-size: root.compact ? 36px : 44px;
             font-weight: 800;
         }
 
@@ -152,24 +153,28 @@ component LimitCard inherits Rectangle {
             text: root.stealth-mode ? "кредиты: ***" : root.credits;
             color: Theme.text-muted;
             font-size: 13px;
+            wrap: word-wrap;
         }
 
         Text {
             text: root.stealth-mode ? "запросы: ***" : root.requests;
             color: Theme.text-muted;
             font-size: 13px;
+            wrap: word-wrap;
         }
 
         Text {
             text: root.rate;
             color: Theme.text-muted;
             font-size: 12px;
+            wrap: word-wrap;
         }
 
         Text {
             text: root.reset;
             color: Theme.text-muted;
             font-size: 12px;
+            wrap: word-wrap;
         }
     }
 }
@@ -180,6 +185,7 @@ component DonutChart inherits Rectangle {
     in property <string> reset;
     in property <float> percent;
     in property <bool> stealth-mode;
+    in property <bool> compact: false;
     
     in property <bool> dimmed: false;
     
@@ -191,7 +197,7 @@ component DonutChart inherits Rectangle {
     border-color: Theme.border;
     border-width: 1px;
     border-radius: 8px;
-    min-height: 210px;
+    min-height: root.compact ? 186px : 210px;
 
     VerticalLayout {
         padding: 12px;
@@ -203,15 +209,15 @@ component DonutChart inherits Rectangle {
             Text {
                 text: "7d";
                 color: Theme.text-primary;
-                font-size: 25px;
+                font-size: root.compact ? 22px : 25px;
                 font-weight: 700;
             }
             Rectangle {}
         }
 
         Rectangle {
-            width: 100px;
-            height: 100px;
+            width: root.compact ? 92px : 100px;
+            height: root.compact ? 92px : 100px;
             
             Path {
                 width: 100px;
@@ -252,7 +258,7 @@ component DonutChart inherits Rectangle {
             Text {
                 text: root.stealth-mode ? "***" : root.remaining;
                 color: Theme.text-primary;
-                font-size: 16px;
+                font-size: root.compact ? 15px : 16px;
                 font-weight: 800;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -264,6 +270,7 @@ component DonutChart inherits Rectangle {
             color: Theme.text-muted;
             font-size: 11px;
             horizontal-alignment: center;
+            wrap: word-wrap;
         }
         
         Text {
@@ -271,6 +278,7 @@ component DonutChart inherits Rectangle {
             color: Theme.text-muted;
             font-size: 11px;
             horizontal-alignment: center;
+            wrap: word-wrap;
         }
     }
 }
@@ -571,7 +579,7 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         spacing: 10px;
 
-                        HorizontalLayout {
+                        if (!root.is-android) : HorizontalLayout {
                             spacing: 12px;
                             alignment: start;
                             Text {
@@ -600,7 +608,7 @@ export component AppWindow inherits Window {
                                 height: 22px;
                                 y: 6px;
                                 border-radius: 11px;
-                                background: #d66f73; // light red/orange alert color
+                                background: #d66f73;
                                 Text {
                                     text: "Обновление: v" + root.new-version-label;
                                     color: #ffffff;
@@ -612,10 +620,53 @@ export component AppWindow inherits Window {
                             }
                         }
 
+                        if (root.is-android) : VerticalLayout {
+                            spacing: 8px;
+
+                            Text {
+                                text: "VibeMode Control";
+                                color: Theme.text-primary;
+                                font-size: 24px;
+                                font-weight: 800;
+                                wrap: word-wrap;
+                            }
+
+                            if (root.active-endpoint-label != "") : Rectangle {
+                                width: 76px;
+                                height: 24px;
+                                border-radius: 12px;
+                                background: root.active-endpoint-label == "api" ? #caa45f : #78ad84;
+                                Text {
+                                    text: root.active-endpoint-label;
+                                    color: #11141a;
+                                    font-size: 11px;
+                                    font-weight: 800;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            if (root.new-version-label != "") : Rectangle {
+                                height: 28px;
+                                border-radius: 14px;
+                                background: #d66f73;
+                                Text {
+                                    text: "Обновление: v" + root.new-version-label;
+                                    color: #ffffff;
+                                    font-size: 11px;
+                                    font-weight: 800;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+
                         Text {
                             text: root.status-text;
                             color: Theme.text-muted;
                             font-size: 15px;
+                            wrap: word-wrap;
                         }
 
                         Rectangle {
@@ -628,12 +679,14 @@ export component AppWindow inherits Window {
                             color: #7fb69c;
                             font-size: 14px;
                             font-weight: 600;
+                            wrap: word-wrap;
                         }
 
                         Text {
                             text: root.agent-text;
                             color: #8da6c8;
                             font-size: 14px;
+                            wrap: word-wrap;
                         }
 
                         Text {
@@ -641,6 +694,7 @@ export component AppWindow inherits Window {
                             color: #c8b56b;
                             font-size: 14px;
                             font-weight: 600;
+                            wrap: word-wrap;
                         }
 
                         if (root.agent-alert-visible) : Rectangle {
@@ -694,26 +748,21 @@ export component AppWindow inherits Window {
                                 spacing: 8px;
                                 Button {
                                     text: "Обновить";
+                                    height: 46px;
                                     clicked => { root.refresh-requested(); }
                                 }
 
                                 Button {
                                     text: "Демо";
+                                    height: 46px;
                                     clicked => { root.demo-requested(); }
                                 }
                             }
 
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Button {
-                                    text: "Мини-окно";
-                                    clicked => { root.launch-mini-overlay(); }
-                                }
-
-                                Button {
-                                    text: root.settings-open ? "Скрыть настройки" : "Настройки";
-                                    clicked => { root.settings-open = !root.settings-open; }
-                                }
+                            Button {
+                                text: root.settings-open ? "Скрыть настройки" : "Настройки";
+                                height: 46px;
+                                clicked => { root.settings-open = !root.settings-open; }
                             }
                         }
                     }
@@ -747,7 +796,23 @@ export component AppWindow inherits Window {
                         input-type: InputType.password;
                     }
 
-                    HorizontalLayout {
+                    if (root.is-android) : VerticalLayout {
+                        spacing: 8px;
+
+                        Button {
+                            text: "Сохранить ключ";
+                            height: 46px;
+                            clicked => { root.save-api-key(root.api-key-input); }
+                        }
+
+                        Button {
+                            text: "Проверить";
+                            height: 46px;
+                            clicked => { root.refresh-requested(); }
+                        }
+                    }
+
+                    if (!root.is-android) : HorizontalLayout {
                         spacing: 8px;
 
                         Button {
@@ -772,7 +837,7 @@ export component AppWindow inherits Window {
 
             Rectangle {
                 visible: root.settings-open;
-                height: root.settings-open ? (root.is-android ? 390px : 270px) : 0px;
+                height: root.settings-open ? (root.is-android ? 560px : 270px) : 0px;
                 background: Theme.bg-card;
                 border-radius: 8px;
                 border-color: Theme.border;
@@ -804,7 +869,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        HorizontalLayout {
+                        if (!root.is-android) : HorizontalLayout {
                             spacing: 8px;
                             alignment: start;
 
@@ -852,14 +917,74 @@ export component AppWindow inherits Window {
                                 toggled => { Theme.dark-mode = !self.checked; }
                             }
                         }
+
+                        if (root.is-android) : VerticalLayout {
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: "Все";
+                                    height: 44px;
+                                    clicked => {
+                                        root.period-mode = 0;
+                                        root.risk-only = false;
+                                    }
+                                }
+
+                                Button {
+                                    text: "5h + 24h";
+                                    height: 44px;
+                                    clicked => {
+                                        root.period-mode = 1;
+                                        root.risk-only = false;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: "7d + 30d";
+                                    height: 44px;
+                                    clicked => {
+                                        root.period-mode = 2;
+                                        root.risk-only = false;
+                                    }
+                                }
+
+                                Button {
+                                    text: "Только риск";
+                                    height: 44px;
+                                    clicked => {
+                                        root.period-mode = 0;
+                                        root.risk-only = !root.risk-only;
+                                    }
+                                }
+                            }
+
+                            Button {
+                                text: root.stealth-mode ? "🔓 Показать" : "🔒 Скрыть";
+                                height: 44px;
+                                clicked => {
+                                    root.stealth-mode = !root.stealth-mode;
+                                }
+                            }
+
+                            CheckBox {
+                                text: "Светлая тема";
+                                checked: !Theme.dark-mode;
+                                toggled => { Theme.dark-mode = !self.checked; }
+                            }
+                        }
                     }
 
-                    Rectangle {
+                    if (!root.is-android) : Rectangle {
                         height: 1px;
                         background: #2c3549;
                     }
 
-                    HorizontalLayout {
+                    if (!root.is-android) : HorizontalLayout {
                         spacing: 20px;
 
                         VerticalLayout {
@@ -936,7 +1061,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        HorizontalLayout {
+                        if (!root.is-android) : HorizontalLayout {
                             spacing: 12px;
                             alignment: start;
 
@@ -1021,14 +1146,107 @@ export component AppWindow inherits Window {
                                 vertical-alignment: center;
                             }
                         }
+
+                        if (root.is-android) : VerticalLayout {
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 10px;
+
+                                Text {
+                                    text: "warning";
+                                    color: #caa45f;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+
+                                Text {
+                                    text: "\{round(root.warning-threshold)}%";
+                                    color: Theme.text-muted;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    min-width: 40px;
+                                }
+
+                                Button {
+                                    text: "-";
+                                    height: 42px;
+                                    clicked => {
+                                        if (root.warning-threshold > 10) {
+                                            root.warning-threshold -= 5;
+                                            root.settings-changed(root.warning-threshold, root.danger-threshold);
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    text: "+";
+                                    height: 42px;
+                                    clicked => {
+                                        if (root.warning-threshold < root.danger-threshold - 5) {
+                                            root.warning-threshold += 5;
+                                            root.settings-changed(root.warning-threshold, root.danger-threshold);
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+
+                                Text {
+                                    text: "danger";
+                                    color: #d66f73;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                }
+
+                                Text {
+                                    text: "\{round(root.danger-threshold)}%";
+                                    color: Theme.text-muted;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    min-width: 40px;
+                                }
+
+                                Button {
+                                    text: "-";
+                                    height: 42px;
+                                    clicked => {
+                                        if (root.danger-threshold > root.warning-threshold + 5) {
+                                            root.danger-threshold -= 5;
+                                            root.settings-changed(root.warning-threshold, root.danger-threshold);
+                                        }
+                                    }
+                                }
+
+                                Button {
+                                    text: "+";
+                                    height: 42px;
+                                    clicked => {
+                                        if (root.danger-threshold < 100) {
+                                            root.danger-threshold += 5;
+                                            root.settings-changed(root.warning-threshold, root.danger-threshold);
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: root.risk-only ? "режим: риск" : root.period-mode == 1 ? "режим: короткие окна" : root.period-mode == 2 ? "режим: длинные окна" : "режим: все окна";
+                                color: #aeb8c7;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                        }
                     }
 
-                    Rectangle {
+                    if (!root.is-android) : Rectangle {
                         height: 1px;
                         background: #2c3549;
                     }
 
-                    HorizontalLayout {
+                    if (!root.is-android) : HorizontalLayout {
                         spacing: 20px;
 
                         VerticalLayout {
@@ -1088,7 +1306,7 @@ export component AppWindow inherits Window {
 }
             }
 
-            GridLayout {
+            if (!root.is-android) : GridLayout {
                 spacing: 14px;
 
                 LimitCard {
@@ -1106,6 +1324,7 @@ export component AppWindow inherits Window {
                     request-percent: root.five-request-percent;
                     trend-data: root.five-trend-data;
                     stealth-mode: root.stealth-mode;
+                    compact: false;
                     dimmed: root.period-mode == 2 || (root.risk-only && root.five-percent < 75);
                 }
 
@@ -1117,6 +1336,7 @@ export component AppWindow inherits Window {
                     reset: root.week-reset;
                     percent: root.week-percent;
                     stealth-mode: root.stealth-mode;
+                    compact: false;
                     dimmed: root.period-mode == 1 || (root.risk-only && root.week-percent < 75);
                 }
 
@@ -1135,6 +1355,7 @@ export component AppWindow inherits Window {
                     request-percent: root.week-request-percent;
                     trend-data: root.week-trend-data;
                     stealth-mode: root.stealth-mode;
+                    compact: false;
                     dimmed: root.period-mode == 1 || (root.risk-only && root.week-percent < 75);
                 }
 
@@ -1153,7 +1374,90 @@ export component AppWindow inherits Window {
                     request-percent: root.month-request-percent;
                     trend-data: root.month-trend-data;
                     stealth-mode: root.stealth-mode;
+                    compact: false;
                     dimmed: root.period-mode == 1 || (root.risk-only && root.month-percent < 75);
+                }
+            }
+
+            if (root.is-android) : ScrollView {
+                width: 100%;
+                height: 100%;
+                viewport-width: self.width;
+                viewport-height: 820px;
+
+                GridLayout {
+                    y: 0px;
+                    width: parent.width - 12px;
+                    spacing: 12px;
+
+                    LimitCard {
+                        row: 0;
+                        col: 0;
+                        name: "5h";
+                        level: root.five-level;
+                        reset: root.five-reset;
+                        credits: root.five-credits;
+                        requests: root.five-requests;
+                        rate: root.five-rate;
+                        percent-text: root.five-percent-text;
+                        percent: root.five-percent;
+                        credit-percent: root.five-credit-percent;
+                        request-percent: root.five-request-percent;
+                        trend-data: root.five-trend-data;
+                        stealth-mode: root.stealth-mode;
+                        compact: true;
+                        dimmed: root.period-mode == 2 || (root.risk-only && root.five-percent < 75);
+                    }
+
+                    DonutChart {
+                        row: 1;
+                        col: 0;
+                        remaining: root.donut-remaining;
+                        total: root.donut-limit;
+                        reset: root.week-reset;
+                        percent: root.week-percent;
+                        stealth-mode: root.stealth-mode;
+                        compact: true;
+                        dimmed: root.period-mode == 1 || (root.risk-only && root.week-percent < 75);
+                    }
+
+                    LimitCard {
+                        row: 2;
+                        col: 0;
+                        name: "7d";
+                        level: root.week-level;
+                        reset: root.week-reset;
+                        credits: root.week-credits;
+                        requests: root.week-requests;
+                        rate: root.week-rate;
+                        percent-text: root.week-percent-text;
+                        percent: root.week-percent;
+                        credit-percent: root.week-credit-percent;
+                        request-percent: root.week-request-percent;
+                        trend-data: root.week-trend-data;
+                        stealth-mode: root.stealth-mode;
+                        compact: true;
+                        dimmed: root.period-mode == 1 || (root.risk-only && root.week-percent < 75);
+                    }
+
+                    LimitCard {
+                        row: 3;
+                        col: 0;
+                        name: "30d";
+                        level: root.month-level;
+                        reset: root.month-reset;
+                        credits: root.month-credits;
+                        requests: root.month-requests;
+                        rate: root.month-rate;
+                        percent-text: root.month-percent-text;
+                        percent: root.month-percent;
+                        credit-percent: root.month-credit-percent;
+                        request-percent: root.month-request-percent;
+                        trend-data: root.month-trend-data;
+                        stealth-mode: root.stealth-mode;
+                        compact: true;
+                        dimmed: root.period-mode == 1 || (root.risk-only && root.month-percent < 75);
+                    }
                 }
             }
         }
