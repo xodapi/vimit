@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -5,7 +6,7 @@ use std::thread;
 use slint::{ModelRc, VecModel, Weak};
 
 use crate::AppWindow;
-use crate::config::{GuiAccount, endpoint_for_label, gui_load_dotenv, runtime_config};
+use crate::config::{GuiAccount, gui_load_dotenv, runtime_config};
 use crate::ng;
 use crate::overlay::{
     CreatureState, OverlayHistory, OverlayState, build_overlay_state, creature_node_count_for_skin,
@@ -281,61 +282,36 @@ fn load_dashboard(
     overlay_history: &Arc<Mutex<OverlayHistory>>,
     auto_failover: bool,
 ) -> Result<GuiDashboardResult, String> {
-    let (payload, source, active_endpoint_label, abtop_bin, live_api_key_present) = if force_demo {
-        (
-            ng::demo_payload(),
-            "источник: встроенные демо-данные".to_string(),
-            "demo".to_string(),
-            String::new(),
-            false,
-        )
-    } else if let Some(path) = mock_path {
-        (
-            ng::load_mock(path)?,
-            format!("источник: mock {}", path),
-            "mock".to_string(),
-            String::new(),
-            false,
-        )
+    let dotenv = if force_demo || mock_path.is_some() {
+        HashMap::new()
     } else {
-        let dotenv = gui_load_dotenv()?;
-        let config = runtime_config(&dotenv, account, auto_failover);
-        if config.api_key.is_empty() {
-            (
-                ng::demo_payload(),
-                "источник: демо; добавьте VIBEMODE_API_KEY в .env для live-лимитов".to_string(),
-                "demo".to_string(),
-                config.abtop_bin,
-                false,
-            )
-        } else {
-            let (value, label) = if config.auto_failover
-                && config.api_base.trim_end_matches('/') == ng::DEFAULT_API_BASE
-            {
-                let mut router = router.lock().unwrap();
-                http.fetch_me_with_retry(&config.api_key, &mut router, &config.api_base)?
-            } else {
-                let mut router = ng::Router::new(
-                    config.api_base.clone(),
-                    ng::api_fallbacks_for(&config.api_base, config.auto_failover),
-                );
-                http.fetch_me_with_retry(&config.api_key, &mut router, &config.api_base)?
-            };
-            let endpoint = endpoint_for_label(&label, &config.api_base);
-            (
-                value,
-                format!("источник: live VibeMode /v1/me на {endpoint}"),
-                label,
-                config.abtop_bin,
-                true,
-            )
-        }
+        gui_load_dotenv()?
     };
+    let config = runtime_config(&dotenv, account, auto_failover);
+    let request = ng::DashboardRefreshRequest {
+        force_demo,
+        mock_path,
+        warning_threshold: warning,
+        danger_threshold: danger,
+        missing_api_key_source: "источник: демо; добавьте VIBEMODE_API_KEY в .env для live-лимитов",
+    };
+    let shared =
+        if config.auto_failover && config.api_base.trim_end_matches('/') == ng::DEFAULT_API_BASE {
+            let mut shared_router = router.lock().unwrap();
+            ng::load_dashboard_refresh(request, &config, http, &mut shared_router)?
+        } else {
+            let mut local_router = ng::Router::new(
+                config.api_base.clone(),
+                ng::api_fallbacks_for(&config.api_base, config.auto_failover),
+            );
+            ng::load_dashboard_refresh(request, &config, http, &mut local_router)?
+        };
 
-    let windows = ng::summarize_me(&payload, warning, danger);
-    let status = ng::dashboard_status(&windows);
+    let abtop_bin = config.abtop_bin.clone();
+    let live_api_key_present = shared.live_api_key_present;
+    let mut dashboard = shared.dashboard;
     let agent = read_agent_status_for_gui(&abtop_bin);
-    let overlay = build_overlay_state(&windows, &agent.token_rate, overlay_history);
+    let overlay = build_overlay_state(&dashboard.windows, &agent.token_rate, overlay_history);
 
     let mut five_trend_data = Vec::new();
     let mut day_trend_data = Vec::new();
@@ -344,7 +320,7 @@ fn load_dashboard(
 
     if let Ok(Some(store)) = ng::cli::trends::TrendStore::open() {
         if live_api_key_present {
-            let _ = store.save_snapshot(&windows, chrono::Utc::now());
+            let _ = store.save_snapshot(&dashboard.windows, chrono::Utc::now());
         }
         if let Ok(days) = store.query_trends(15) {
             for day in &days {
@@ -382,16 +358,12 @@ fn load_dashboard(
         ];
     }
 
+    dashboard.agent = agent.summary;
+    dashboard.token_rate = agent.token_rate;
+
     Ok(GuiDashboardResult {
-        dashboard: ng::Dashboard {
-            source,
-            status,
-            agent: agent.summary,
-            token_rate: agent.token_rate,
-            windows,
-            daily: None,
-        },
-        active_endpoint_label,
+        dashboard,
+        active_endpoint_label: shared.active_endpoint_label,
         five_trend_data,
         day_trend_data,
         week_trend_data,

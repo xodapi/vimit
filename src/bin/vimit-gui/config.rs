@@ -55,11 +55,3 @@ pub(crate) fn runtime_config(
         auto_failover,
     }
 }
-
-pub(crate) fn endpoint_for_label(label: &str, configured_api_base: &str) -> String {
-    match label {
-        "api" => ng::DEFAULT_API_BASE.to_string(),
-        "r-api" => ng::FALLBACK_API_BASE.to_string(),
-        _ => configured_api_base.to_string(),
-    }
-}
