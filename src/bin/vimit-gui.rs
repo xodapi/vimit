@@ -17,7 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tray_icon::{
     Icon, MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent,
-    menu::{Menu, MenuEvent, MenuItem},
+    menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
 use vimit as ng;
@@ -342,6 +342,52 @@ fn create_status_icon(color: (u8, u8, u8)) -> Icon {
     Icon::from_rgba(rgba, width as u32, height as u32).expect("failed to create tray icon")
 }
 
+#[derive(Clone)]
+struct TrayIds {
+    show: MenuId,
+    mini: MenuId,
+    quit: MenuId,
+}
+
+fn try_init_tray() -> Option<TrayIds> {
+    let tray_menu = Menu::new();
+    let show_item = MenuItem::new("Показать окно", true, None);
+    let mini_item = MenuItem::new("Мини-окно", true, None);
+    let quit_item = MenuItem::new("Выход", true, None);
+
+    for item in [&show_item, &mini_item, &quit_item] {
+        if let Err(error) = tray_menu.append(item) {
+            eprintln!("vimit-gui: tray menu unavailable: {error}");
+            return None;
+        }
+    }
+
+    let ids = TrayIds {
+        show: show_item.id().clone(),
+        mini: mini_item.id().clone(),
+        quit: quit_item.id().clone(),
+    };
+
+    let tray_icon_instance = match TrayIconBuilder::new()
+        .with_menu(Box::new(tray_menu))
+        .with_tooltip("VibeMode Control")
+        .with_icon(create_status_icon((141, 150, 170)))
+        .build()
+    {
+        Ok(icon) => icon,
+        Err(error) => {
+            eprintln!("vimit-gui: tray unavailable: {error}");
+            return None;
+        }
+    };
+
+    TRAY_ICON.with(|cell| {
+        *cell.borrow_mut() = Some(tray_icon_instance);
+    });
+
+    Some(ids)
+}
+
 fn spawn_mini_overlay(force_demo: bool) -> Result<(), String> {
     let current =
         std::env::current_exe().map_err(|error| format!("cannot find GUI exe: {error}"))?;
@@ -560,37 +606,17 @@ fn main() {
         set_overlay_window_size(&app, is_compact);
     }
 
-    // Initialize System Tray
-    let tray_menu = Menu::new();
-    let show_item = MenuItem::new("Показать окно", true, None);
-    let mini_item = MenuItem::new("Мини-окно", true, None);
-    let quit_item = MenuItem::new("Выход", true, None);
-    tray_menu.append(&show_item).unwrap();
-    tray_menu.append(&mini_item).unwrap();
-    tray_menu.append(&quit_item).unwrap();
-
-    let show_id = show_item.id().clone();
-    let mini_id = mini_item.id().clone();
-    let quit_id = quit_item.id().clone();
-
-    let tray_icon_instance = TrayIconBuilder::new()
-        .with_menu(Box::new(tray_menu))
-        .with_tooltip("VibeMode Control")
-        .with_icon(create_status_icon((141, 150, 170))) // grey by default
-        .build()
-        .unwrap();
-
-    TRAY_ICON.with(|cell| {
-        *cell.borrow_mut() = Some(tray_icon_instance);
-    });
+    let tray_ids = try_init_tray();
+    let has_tray = tray_ids.is_some();
 
     // Minimize to tray on close request
     let weak = app.as_weak();
     app.window().on_close_requested(move || {
-        if let Some(app) = weak.upgrade() {
+        if has_tray && let Some(app) = weak.upgrade() {
             let _ = app.hide();
+            return slint::CloseRequestResponse::KeepWindowShown;
         }
-        slint::CloseRequestResponse::KeepWindowShown
+        slint::CloseRequestResponse::HideWindow
     });
 
     app.on_close_overlay(move || {
@@ -684,20 +710,19 @@ fn main() {
     // Listen for Tray Events
     let tray_timer = Timer::default();
     let weak = app.as_weak();
-    let show_id_clone = show_id.clone();
-    let mini_id_clone = mini_id.clone();
-    let quit_id_clone = quit_id.clone();
     tray_timer.start(TimerMode::Repeated, Duration::from_millis(100), move || {
-        if let (Ok(event), Some(app)) = (MenuEvent::receiver().try_recv(), weak.upgrade()) {
-            if event.id == show_id_clone {
-                let _ = app.show();
-            } else if event.id == mini_id_clone {
-                let demo = app.get_active_endpoint_label().as_str() == "demo";
-                if let Err(error) = spawn_mini_overlay(demo) {
-                    app.set_error_text(error.into());
+        if let Some(ids) = tray_ids.as_ref() {
+            if let (Ok(event), Some(app)) = (MenuEvent::receiver().try_recv(), weak.upgrade()) {
+                if event.id == ids.show {
+                    let _ = app.show();
+                } else if event.id == ids.mini {
+                    let demo = app.get_active_endpoint_label().as_str() == "demo";
+                    if let Err(error) = spawn_mini_overlay(demo) {
+                        app.set_error_text(error.into());
+                    }
+                } else if event.id == ids.quit {
+                    let _ = slint::quit_event_loop();
                 }
-            } else if event.id == quit_id_clone {
-                let _ = slint::quit_event_loop();
             }
         }
         if let (Ok(event), Some(app)) = (TrayIconEvent::receiver().try_recv(), weak.upgrade()) {
