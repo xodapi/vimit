@@ -1499,6 +1499,43 @@ mod tests {
     }
 
     #[test]
+    fn burn_detector_switches_at_timeout_boundary_and_recovers() {
+        let mut detector = AgentBurnDetector::new(AgentBurnConfig {
+            min_rate_per_sec: 1.0,
+            timeout_secs: 60,
+        });
+        let burning = AgentPulse::from_abtop_status(&json!({
+            "interval_ms": 1000,
+            "token_rate": 10.0,
+            "sessions_total": 1,
+            "sessions_active": 1
+        }));
+        let idle = AgentPulse::from_abtop_status(&json!({
+            "interval_ms": 1000,
+            "token_rate": 0.0,
+            "sessions_total": 1,
+            "sessions_active": 0
+        }));
+
+        assert_eq!(
+            detector.observe(&burning, 100).state,
+            AgentBurnState::Active
+        );
+
+        let before_timeout = detector.observe(&burning, 159);
+        assert_eq!(before_timeout.state, AgentBurnState::Active);
+        assert_eq!(before_timeout.burning_for_secs, Some(59));
+
+        let at_timeout = detector.observe(&burning, 160);
+        assert_eq!(at_timeout.state, AgentBurnState::Runaway);
+        assert_eq!(at_timeout.burning_for_secs, Some(60));
+
+        let recovery = detector.observe(&idle, 161);
+        assert_eq!(recovery.state, AgentBurnState::Recovery);
+        assert_eq!(recovery.burning_for_secs, None);
+    }
+
+    #[test]
     fn burn_detector_recovers_when_rate_drops_to_zero() {
         let mut detector = AgentBurnDetector::new(AgentBurnConfig {
             min_rate_per_sec: 1.0,

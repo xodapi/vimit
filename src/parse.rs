@@ -405,6 +405,43 @@ mod tests {
     }
 
     #[test]
+    fn window_level_changes_on_threshold_boundaries() {
+        let mut credits = Metric {
+            used: 74.9,
+            limit: 100.0,
+            remaining: 25.1,
+            percent: 74.9,
+        };
+
+        assert_eq!(window_level(Some(&credits), None, 75.0, 90.0), "ok");
+
+        credits.percent = 75.0;
+        assert_eq!(window_level(Some(&credits), None, 75.0, 90.0), "warning");
+
+        credits.percent = 89.9;
+        assert_eq!(window_level(Some(&credits), None, 75.0, 90.0), "warning");
+
+        credits.percent = 90.0;
+        assert_eq!(window_level(Some(&credits), None, 75.0, 90.0), "danger");
+    }
+
+    #[test]
+    fn summarize_metric_clamps_over_limit_percent() {
+        let payload = json!({
+            "usage": {
+                "rows": [{"credits5Hours": 1500, "creditLimit5Hours": 100}]
+            }
+        });
+
+        let windows = summarize_me(&payload, 75.0, 90.0);
+        let credits = windows[0].credits.as_ref().unwrap();
+
+        assert_eq!(credits.remaining, 0.0);
+        assert_eq!(credits.percent, 999.0);
+        assert_eq!(windows[0].level, "danger");
+    }
+
+    #[test]
     fn peak_percent_returns_max() {
         let windows = summarize_me(&demo_payload(), 75.0, 90.0);
         assert_eq!(
