@@ -49,6 +49,7 @@ pub struct Args {
     pub list_accounts: bool,
     pub doctor: bool,
     pub init: bool,
+    pub mcp: bool,
     pub vpn: bool,
     pub auto_failover: bool,
     pub no_cache: bool,
@@ -88,6 +89,7 @@ where
         list_accounts: false,
         doctor: false,
         init: false,
+        mcp: false,
         vpn: false,
         auto_failover: true,
         no_cache: false,
@@ -122,6 +124,7 @@ where
             "--list-accounts" => parsed.list_accounts = true,
             "--doctor" => parsed.doctor = true,
             "--init" => parsed.init = true,
+            "--mcp" => parsed.mcp = true,
             "--vpn" => parsed.vpn = true,
             "--no-failover" => parsed.auto_failover = false,
             "--no-cache" => parsed.no_cache = true,
@@ -320,6 +323,7 @@ OPTIONS:
       --list-accounts        List available account profiles
       --doctor               Run system diagnostics
       --init                 Interactive setup wizard
+      --mcp                  Start MCP server on stdio
       --trend                Show 30-day usage trends (requires saved snapshots)
       --days <N>             Days of trend history to show [default: 30]
   

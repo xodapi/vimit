@@ -1,10 +1,18 @@
-use redb::{Database, TableDefinition};
+use redb::{Database, ReadableTable, TableDefinition};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("api_cache");
 const DEFAULT_TTL_SECS: u64 = 30;
+
+pub struct CacheEntry {
+    pub cache_key: String,
+    pub api_base: String,
+    pub cached_at: String,
+    pub age_secs: u64,
+    pub payload: Value,
+}
 
 pub struct CacheStore {
     db: Database,
@@ -111,6 +119,51 @@ impl CacheStore {
     #[allow(dead_code)]
     pub fn ttl(&self) -> Duration {
         self.ttl
+    }
+
+    pub fn entries(&self) -> Result<Vec<CacheEntry>, String> {
+        let tx = self
+            .db
+            .begin_read()
+            .map_err(|e| format!("cache read tx failed: {e}"))?;
+        let table = tx
+            .open_table(TABLE)
+            .map_err(|e| format!("cache table open failed: {e}"))?;
+        let now_secs = std::time::UNIX_EPOCH
+            .elapsed()
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let mut entries = Vec::new();
+        for item in table
+            .iter()
+            .map_err(|e| format!("cache iteration failed: {e}"))?
+        {
+            let (key, value) = item.map_err(|e| format!("cache row read failed: {e}"))?;
+            let cache_key = std::str::from_utf8(key.value())
+                .map_err(|e| format!("cache key is invalid UTF-8: {e}"))?
+                .to_string();
+            let parsed: Value = serde_json::from_slice(value.value())
+                .map_err(|e| format!("cache value is invalid JSON: {e}"))?;
+            let cached_at = parsed
+                .get("cached_at")
+                .and_then(Value::as_str)
+                .unwrap_or("0")
+                .to_string();
+            let cached_at_secs = cached_at.parse::<u64>().unwrap_or(0);
+            let payload = parsed.get("payload").cloned().unwrap_or(Value::Null);
+            let api_base = cache_key
+                .split_once('|')
+                .map(|(_, api_base)| api_base.to_string())
+                .unwrap_or_default();
+            entries.push(CacheEntry {
+                cache_key,
+                api_base,
+                cached_at,
+                age_secs: now_secs.saturating_sub(cached_at_secs),
+                payload,
+            });
+        }
+        Ok(entries)
     }
 }
 

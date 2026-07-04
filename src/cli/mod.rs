@@ -6,6 +6,7 @@ pub mod constants;
 pub mod daily;
 pub mod doctor;
 pub mod init;
+pub mod mcp;
 pub mod monitor;
 pub mod notify;
 pub mod output;
