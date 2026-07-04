@@ -368,6 +368,43 @@ https://github.com/xodapi/vimit/discussions
 - Linux (x86_64, aarch64)
 - Android/Termux — см. [docs/termux.md](docs/termux.md); native Slint Android spike описан в [docs/android.md](docs/android.md)
 
+## Optional Jujutsu Workflow
+
+`jj` здесь уместен только как optional локальный workflow поверх уже
+существующего Git-репозитория. Он может сделать локальные итерации удобнее за
+счёт operation log, более мягкого восстановления после конфликтов и аккуратной
+истории промежуточных изменений, но не должен заменять canonical GitHub flow
+проекта.
+
+Рекомендация по проекту:
+
+- Использовать `jj` только если разработчику или агенту он уже удобен локально.
+- GitHub Issues, ветки, PR и remote state оставлять на `git` + `gh`.
+- Не делать `jj` обязательным для CI, build scripts, onboarding или AGENTS workflow.
+- Не добавлять `vcs-jj` или `vcs-core`, пока отдельный automation issue не
+  докажет, что это решает конкретную проблему проекта.
+
+Минимальный issue workflow с `jj`:
+
+```bash
+jj git clone https://github.com/xodapi/vimit.git
+cd vimit
+gh issue view 138
+git checkout -b issue-138-evaluate-optional-jujutsu-workflow
+jj bookmark create issue-138-evaluate-optional-jujutsu-workflow -r @
+
+# правки, затем обязательная проверка
+cargo fmt --check
+
+# когда всё готово, синхронизировать текущий jj commit с Git-веткой и пушить как обычно
+jj git push --bookmark issue-138-evaluate-optional-jujutsu-workflow
+gh pr create --base main --title "docs(dev): evaluate optional Jujutsu workflow" --body "Closes #138"
+```
+
+Если использовать `jj`, то только как личный слой удобства поверх Git. Для
+репозитория по-прежнему обязательны Git-совместимые имена веток, обычные
+коммиты и тот же issue/PR workflow, который описан в `AGENTS.md`.
+
 ## Тесты
 
 ```bash
