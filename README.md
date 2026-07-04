@@ -378,6 +378,43 @@ See [ROADMAP.md](ROADMAP.md) for the current improvement backlog.
 - Linux (x86_64, aarch64)
 - Android/Termux — see [docs/termux.md](docs/termux.md); native Slint Android spike is tracked in [docs/android.md](docs/android.md)
 
+## Optional Jujutsu Workflow
+
+`jj` is reasonable here only as an optional local workflow on top of the
+existing Git repository. It can improve local iteration with operation log,
+conflict recovery, and cleaner in-progress history, but it should not replace
+the project's canonical GitHub flow.
+
+Recommended stance:
+
+- Use `jj` only if a developer or agent already prefers it locally.
+- Keep GitHub Issues, branches, PRs, and remote state managed through `git` +
+  `gh`.
+- Do not require `jj` in CI, build scripts, onboarding, or AGENTS workflow.
+- Do not add `vcs-jj` or `vcs-core` unless a future automation issue proves
+  they solve a concrete project problem.
+
+Minimal issue workflow with `jj`:
+
+```bash
+jj git clone https://github.com/xodapi/vimit.git
+cd vimit
+gh issue view 138
+git checkout -b issue-138-evaluate-optional-jujutsu-workflow
+jj bookmark create issue-138-evaluate-optional-jujutsu-workflow -r @
+
+# edit files, then verify the required check
+cargo fmt --check
+
+# when ready, sync the current jj commit to the Git branch and push normally
+jj git push --bookmark issue-138-evaluate-optional-jujutsu-workflow
+gh pr create --base main --title "docs(dev): evaluate optional Jujutsu workflow" --body "Closes #138"
+```
+
+If you use `jj`, treat it as a personal productivity layer. The repository
+still expects Git-compatible branch names, standard commits, and the same issue
+assignment / PR review flow documented in `AGENTS.md`.
+
 ## Tests
 
 ```bash
