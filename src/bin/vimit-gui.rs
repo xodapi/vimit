@@ -25,7 +25,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{GuiAccount, endpoint_for_label, runtime_config};
+    use crate::config::{GuiAccount, runtime_config};
     use crate::overlay::{
         CreatureSound, CreatureState, OVERLAY_HISTORY_RETENTION, OverlayHistory,
         build_overlay_state, creature_node_count, creature_node_count_for_skin,
@@ -152,15 +152,15 @@ mod tests {
     #[test]
     fn endpoint_label_maps_to_visible_api_url() {
         assert_eq!(
-            endpoint_for_label("api", "https://custom.example"),
+            ng::dashboard_endpoint_for_label("api", "https://custom.example"),
             ng::DEFAULT_API_BASE
         );
         assert_eq!(
-            endpoint_for_label("r-api", "https://custom.example"),
+            ng::dashboard_endpoint_for_label("r-api", "https://custom.example"),
             ng::FALLBACK_API_BASE
         );
         assert_eq!(
-            endpoint_for_label("custom", "https://custom.example"),
+            ng::dashboard_endpoint_for_label("custom", "https://custom.example"),
             "https://custom.example"
         );
     }

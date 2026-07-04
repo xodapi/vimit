@@ -3,6 +3,7 @@
 pub mod android;
 pub mod api;
 pub mod cli;
+pub mod dashboard_refresh;
 pub mod parse;
 
 #[cfg(all(target_os = "android", feature = "android-gui"))]
@@ -12,6 +13,7 @@ pub use android::{
     android_runaway_alert_text,
 };
 pub use api::*;
+pub use dashboard_refresh::*;
 pub use parse::*;
 
 use chrono::{SecondsFormat, Utc};
