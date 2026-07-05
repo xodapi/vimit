@@ -82,6 +82,45 @@ session names, or other private workflow content. Foreground notification text
 should stay generic, for example "VibeMode warning in 5h window", and vibration
 should be keyed off alert level only.
 
+## Live token telemetry source
+
+The Android live-token chart should use an `abtop --status-json` compatible
+payload as the telemetry contract for the first implementation. This matches
+the Rust dashboard code that already parses agent status, keeps the Android UI
+independent from a not-yet-existing VibeMode endpoint, and avoids the coarse
+quota-window delta approximation as the primary signal.
+
+The contract can be served by a local bridge, a remote collector reachable from
+the phone, or a future API endpoint, but the payload shape should stay stable:
+
+- `interval_ms`: sample interval used to normalize values into `tokens/sec`
+- `token_rate`: aggregate tokens consumed during the current sample interval
+- `sessions_total`: number of known agent sessions
+- `sessions_active`: number of sessions currently active
+- `agents[]`: optional per-agent entries with `agent_cli`, `token_rate`, and
+  `max_context_pct`
+
+For the first Android chart, `token_rate` plus `interval_ms` is enough to drive
+the active/idle pulse, aggregate `tokens/sec`, recent history, and timeout
+detection. If top-level `token_rate` is missing, the Rust model may sum
+`agents[].token_rate`.
+
+This MVP does not satisfy a strict `input_tokens/sec` and `output_tokens/sec`
+split. The collector should add these optional fields before Android claims
+that part of the acceptance criteria:
+
+- `input_token_rate`
+- `output_token_rate`
+- `agents[].input_token_rate`
+- `agents[].output_token_rate`
+
+Until those fields exist, issue #105 should be treated as either an aggregate
+rate MVP or split into two tasks: aggregate live pulse/chart first, then full
+input/output telemetry after the collector/API contract is extended.
+
+Telemetry payloads must stay privacy-safe. They must not include API keys,
+prompts, paths, tool arguments, raw session transcripts, or user task titles.
+
 ## Notification and vibration bridge
 
 The existing desktop notification code is not an Android implementation. The
