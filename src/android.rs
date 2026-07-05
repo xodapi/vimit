@@ -2,23 +2,212 @@
 slint::include_modules!();
 
 #[cfg(all(target_os = "android", feature = "android-gui"))]
-use slint::{ComponentHandle, SharedString, Weak};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel, Weak};
 
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+use crate::AgentPulse;
 use crate::{AgentBurnEvent, AgentBurnState, DEFAULT_ANDROID_ALERT_COOLDOWN_SECS, WindowState};
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 use crate::{
-    DEFAULT_API_BASE, DEFAULT_DANGER_THRESHOLD, DEFAULT_WARNING_THRESHOLD, HttpClient, Router,
-    USER_AGENT_GUI, api_fallbacks_for, dashboard_status, demo_payload, format_percent, metric_text,
-    peak_percent, short_number, summarize_me,
+    DEFAULT_ABTOP_BIN, DEFAULT_API_BASE, DEFAULT_DANGER_THRESHOLD, DEFAULT_WARNING_THRESHOLD,
+    HttpClient, Router, USER_AGENT_GUI, api_fallbacks_for, dashboard_status, demo_payload,
+    format_percent, metric_text, peak_percent, read_abtop_status, short_number, summarize_me,
 };
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 use std::fs;
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 use std::path::PathBuf;
 #[cfg(all(target_os = "android", feature = "android-gui"))]
-use std::sync::Mutex;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const ANDROID_NOTIFICATION_RUNTIME_PERMISSION_SDK: i32 = 33;
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+const ANDROID_AGENT_HISTORY_SAMPLES: usize = 36;
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+const ANDROID_AGENT_IDLE_TIMEOUT_SECS: u64 = 45;
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+const ANDROID_REFRESH_INTERVAL_SECS: u64 = 10;
+
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+#[derive(Debug, Clone, PartialEq)]
+struct AndroidLiveTokenUiState {
+    pulse_label: &'static str,
+    pulse_level: &'static str,
+    rate_text: String,
+    detail_text: String,
+    history: Vec<f32>,
+    history_path: String,
+    timed_out: bool,
+}
+
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+impl AndroidLiveTokenUiState {
+    fn unknown() -> Self {
+        Self {
+            pulse_label: "Unknown",
+            pulse_level: "unknown",
+            rate_text: "токены/сек: нет данных".to_string(),
+            detail_text: "телеметрия недоступна".to_string(),
+            history: Vec::new(),
+            history_path: String::new(),
+            timed_out: false,
+        }
+    }
+}
+
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+#[derive(Debug, Clone)]
+struct AndroidLiveTokenTracker {
+    capacity: usize,
+    idle_timeout_secs: u64,
+    samples: Vec<f64>,
+    last_nonzero_secs: Option<u64>,
+}
+
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+impl AndroidLiveTokenTracker {
+    fn new(capacity: usize, idle_timeout_secs: u64) -> Self {
+        Self {
+            capacity,
+            idle_timeout_secs,
+            samples: Vec::new(),
+            last_nonzero_secs: None,
+        }
+    }
+
+    fn observe(&mut self, pulse: Option<&AgentPulse>, now_secs: u64) -> AndroidLiveTokenUiState {
+        let Some(pulse) = pulse else {
+            let history = self.normalized_history();
+            return AndroidLiveTokenUiState {
+                history_path: android_history_path(&history),
+                history,
+                ..AndroidLiveTokenUiState::unknown()
+            };
+        };
+
+        if !pulse.token_rate_known {
+            let history = self.normalized_history();
+            return AndroidLiveTokenUiState {
+                history_path: android_history_path(&history),
+                history,
+                ..AndroidLiveTokenUiState::unknown()
+            };
+        }
+
+        let rate = pulse.token_rate_per_sec.max(0.0);
+        self.push_sample(rate);
+
+        if rate > 0.0 {
+            self.last_nonzero_secs = Some(now_secs);
+            let history = self.normalized_history();
+            return AndroidLiveTokenUiState {
+                pulse_label: "Active",
+                pulse_level: "active",
+                rate_text: format_android_token_rate(rate),
+                detail_text: format!(
+                    "сессии {}/{} · интервал {} ms",
+                    pulse.sessions_active, pulse.sessions_total, pulse.interval_ms
+                ),
+                history_path: android_history_path(&history),
+                history,
+                timed_out: false,
+            };
+        }
+
+        let idle_for = self
+            .last_nonzero_secs
+            .map(|seen| now_secs.saturating_sub(seen))
+            .unwrap_or(0);
+        let timed_out = self.last_nonzero_secs.is_some() && idle_for >= self.idle_timeout_secs;
+        let detail_text = if timed_out {
+            format!("пул завершён · {idle_for}с без расхода")
+        } else if self.last_nonzero_secs.is_some() {
+            format!("расход остановился · {idle_for}с")
+        } else {
+            "расход 0 ток/сек".to_string()
+        };
+
+        let history = self.normalized_history();
+        AndroidLiveTokenUiState {
+            pulse_label: "Idle",
+            pulse_level: if timed_out { "finished" } else { "idle" },
+            rate_text: format_android_token_rate(rate),
+            detail_text,
+            history_path: android_history_path(&history),
+            history,
+            timed_out,
+        }
+    }
+
+    fn push_sample(&mut self, value: f64) {
+        if self.capacity == 0 {
+            return;
+        }
+        self.samples.push(value);
+        if self.samples.len() > self.capacity {
+            let overflow = self.samples.len() - self.capacity;
+            self.samples.drain(0..overflow);
+        }
+    }
+
+    fn normalized_history(&self) -> Vec<f32> {
+        let max_rate = self.samples.iter().copied().fold(0.0, f64::max);
+        if max_rate <= f64::EPSILON {
+            return self.samples.iter().map(|_| 0.0).collect();
+        }
+        self.samples
+            .iter()
+            .map(|sample| ((sample / max_rate) * 100.0).clamp(0.0, 100.0) as f32)
+            .collect()
+    }
+}
+
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+impl Default for AndroidLiveTokenTracker {
+    fn default() -> Self {
+        Self::new(
+            ANDROID_AGENT_HISTORY_SAMPLES,
+            ANDROID_AGENT_IDLE_TIMEOUT_SECS,
+        )
+    }
+}
+
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+fn format_android_token_rate(rate: f64) -> String {
+    let value = format!("{:.1}", rate).replace('.', ",");
+    format!("{value} ток/сек")
+}
+
+#[cfg(any(test, all(target_os = "android", feature = "android-gui")))]
+fn android_history_path(samples: &[f32]) -> String {
+    if samples.is_empty() {
+        return String::new();
+    }
+
+    if samples.len() == 1 {
+        let y = 38.0 - (samples[0].clamp(0.0, 100.0) / 100.0 * 34.0);
+        return format!("M 0.00 {y:.2} L 100.00 {y:.2} ");
+    }
+
+    let mut commands = String::with_capacity(samples.len() * 16);
+    let last = samples.len().saturating_sub(1).max(1) as f32;
+    for (index, sample) in samples.iter().enumerate() {
+        let x = index as f32 / last * 100.0;
+        let y = 38.0 - (sample.clamp(0.0, 100.0) / 100.0 * 34.0);
+        if index == 0 {
+            commands.push_str(&format!("M {x:.2} {y:.2} "));
+        } else {
+            commands.push_str(&format!("L {x:.2} {y:.2} "));
+        }
+    }
+
+    commands
+}
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 const ANDROID_NOTIFICATION_PERMISSION_GRANTED: i32 = 0;
 
@@ -44,7 +233,9 @@ pub fn android_main(app: slint::android::AndroidApp) {
     window.set_api_key_configured(!saved_key.is_empty());
     window.set_setup_status_text("Вставьте VIBEMODE_API_KEY и нажмите Сохранить ключ.".into());
 
-    let key_state = std::sync::Arc::new(std::sync::Mutex::new(saved_key));
+    let key_state = Arc::new(Mutex::new(saved_key));
+    let live_token_tracker = Arc::new(Mutex::new(AndroidLiveTokenTracker::default()));
+    let refresh_in_flight = Arc::new(AtomicBool::new(false));
     let path_for_save = key_path.clone();
     let key_for_save = key_state.clone();
     let weak = window.as_weak();
@@ -69,18 +260,59 @@ pub fn android_main(app: slint::android::AndroidApp) {
     });
 
     let key_for_refresh = key_state.clone();
+    let tracker_for_refresh = live_token_tracker.clone();
+    let in_flight_for_refresh = refresh_in_flight.clone();
     let weak = window.as_weak();
     window.on_refresh_requested(move || {
-        android_start_refresh(weak.clone(), key_for_refresh.clone(), false);
+        android_start_refresh(
+            weak.clone(),
+            key_for_refresh.clone(),
+            tracker_for_refresh.clone(),
+            in_flight_for_refresh.clone(),
+            false,
+        );
     });
 
     let key_for_demo = key_state.clone();
+    let tracker_for_demo = live_token_tracker.clone();
+    let in_flight_for_demo = refresh_in_flight.clone();
     let weak = window.as_weak();
     window.on_demo_requested(move || {
-        android_start_refresh(weak.clone(), key_for_demo.clone(), true);
+        android_start_refresh(
+            weak.clone(),
+            key_for_demo.clone(),
+            tracker_for_demo.clone(),
+            in_flight_for_demo.clone(),
+            true,
+        );
     });
 
-    android_start_refresh(window.as_weak(), key_state, false);
+    let auto_refresh_timer = slint::Timer::default();
+    let weak = window.as_weak();
+    let key_for_timer = key_state.clone();
+    let tracker_for_timer = live_token_tracker.clone();
+    let in_flight_for_timer = refresh_in_flight.clone();
+    auto_refresh_timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_secs(ANDROID_REFRESH_INTERVAL_SECS),
+        move || {
+            android_start_refresh(
+                weak.clone(),
+                key_for_timer.clone(),
+                tracker_for_timer.clone(),
+                in_flight_for_timer.clone(),
+                false,
+            );
+        },
+    );
+
+    android_start_refresh(
+        window.as_weak(),
+        key_state,
+        live_token_tracker,
+        refresh_in_flight,
+        false,
+    );
     window.run().expect("cannot run Slint window");
 }
 
@@ -112,31 +344,51 @@ fn android_save_api_key(path: &std::path::Path, key: &str) -> Result<(), String>
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 fn android_start_refresh(
     app: Weak<AppWindow>,
-    key_state: std::sync::Arc<std::sync::Mutex<String>>,
+    key_state: Arc<Mutex<String>>,
+    live_token_tracker: Arc<Mutex<AndroidLiveTokenTracker>>,
+    refresh_in_flight: Arc<AtomicBool>,
     demo: bool,
 ) {
+    if refresh_in_flight.swap(true, Ordering::SeqCst) {
+        return;
+    }
     std::thread::spawn(move || {
-        let result = android_load_dashboard(&key_state, demo);
+        let result = android_load_dashboard(&key_state, &live_token_tracker, demo);
         let _ = app.upgrade_in_event_loop(move |app| android_apply_dashboard(&app, result));
+        refresh_in_flight.store(false, Ordering::SeqCst);
     });
 }
 
 #[cfg(all(target_os = "android", feature = "android-gui"))]
+#[derive(Debug, Clone)]
+struct AndroidDashboardSnapshot {
+    windows: Vec<WindowState>,
+    source: String,
+    endpoint: String,
+    live_token: AndroidLiveTokenUiState,
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
 fn android_load_dashboard(
-    key_state: &std::sync::Arc<std::sync::Mutex<String>>,
+    key_state: &Arc<Mutex<String>>,
+    live_token_tracker: &Arc<Mutex<AndroidLiveTokenTracker>>,
     demo: bool,
-) -> Result<(Vec<WindowState>, String, String), String> {
+) -> Result<AndroidDashboardSnapshot, String> {
+    let now_secs = android_now_secs();
+    let live_token = android_load_live_token_state(live_token_tracker, demo, now_secs);
+
     if demo {
         let windows = summarize_me(
             &demo_payload(),
             DEFAULT_WARNING_THRESHOLD,
             DEFAULT_DANGER_THRESHOLD,
         );
-        return Ok((
+        return Ok(AndroidDashboardSnapshot {
             windows,
-            "источник: встроенные демо-данные".to_string(),
-            "demo".to_string(),
-        ));
+            source: "источник: встроенные демо-данные".to_string(),
+            endpoint: "demo".to_string(),
+            live_token,
+        });
     }
 
     let key = key_state.lock().unwrap().clone();
@@ -146,11 +398,12 @@ fn android_load_dashboard(
             DEFAULT_WARNING_THRESHOLD,
             DEFAULT_DANGER_THRESHOLD,
         );
-        return Ok((
+        return Ok(AndroidDashboardSnapshot {
             windows,
-            "источник: демо; сохраните VIBEMODE_API_KEY для live-лимитов".to_string(),
-            "demo".to_string(),
-        ));
+            source: "источник: демо; сохраните VIBEMODE_API_KEY для live-лимитов".to_string(),
+            endpoint: "demo".to_string(),
+            live_token,
+        });
     }
 
     let http = HttpClient::new(USER_AGENT_GUI)?;
@@ -164,24 +417,61 @@ fn android_load_dashboard(
         DEFAULT_WARNING_THRESHOLD,
         DEFAULT_DANGER_THRESHOLD,
     );
-    Ok((
+    Ok(AndroidDashboardSnapshot {
         windows,
-        format!("источник: live VibeMode /v1/me ({label})"),
-        label,
-    ))
+        source: format!("источник: live VibeMode /v1/me ({label})"),
+        endpoint: label,
+        live_token,
+    })
 }
 
 #[cfg(all(target_os = "android", feature = "android-gui"))]
-fn android_apply_dashboard(
-    app: &AppWindow,
-    result: Result<(Vec<WindowState>, String, String), String>,
-) {
+fn android_load_live_token_state(
+    tracker: &Arc<Mutex<AndroidLiveTokenTracker>>,
+    demo: bool,
+    now_secs: u64,
+) -> AndroidLiveTokenUiState {
+    let pulse = if demo {
+        Some(android_demo_agent_pulse(now_secs))
+    } else {
+        read_abtop_status(DEFAULT_ABTOP_BIN)
+            .as_ref()
+            .map(AgentPulse::from_abtop_status)
+    };
+    tracker.lock().unwrap().observe(pulse.as_ref(), now_secs)
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_demo_agent_pulse(now_secs: u64) -> AgentPulse {
+    let token_rate = if now_secs % 40 < 28 { 18.0 } else { 0.0 };
+    AgentPulse::from_abtop_status(&serde_json::json!({
+        "interval_ms": 1000,
+        "token_rate": token_rate,
+        "sessions_total": 2,
+        "sessions_active": if token_rate > 0.0 { 1 } else { 0 },
+        "agents": [
+            {"agent_cli": "codex", "token_rate": token_rate, "max_context_pct": 42.0}
+        ]
+    }))
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_apply_dashboard(app: &AppWindow, result: Result<AndroidDashboardSnapshot, String>) {
     match result {
-        Ok((windows, source, endpoint)) => {
+        Ok(snapshot) => {
+            let windows = snapshot.windows;
             app.set_error_text("".into());
             app.set_status_text(dashboard_status(&windows).into());
-            app.set_source_text(source.into());
-            app.set_active_endpoint_label(endpoint.into());
+            app.set_source_text(snapshot.source.into());
+            app.set_active_endpoint_label(snapshot.endpoint.into());
             android_apply_window(app, "5h", windows.iter().find(|window| window.key == "5h"));
             android_apply_window(
                 app,
@@ -195,6 +485,7 @@ fn android_apply_dashboard(
                 windows.iter().find(|window| window.key == "30d"),
             );
             android_apply_vimichi_dashboard_state(app, &windows);
+            android_apply_live_token_state(app, &snapshot.live_token);
         }
         Err(error) => {
             let msg = if error.contains("HTTP 401") {
@@ -207,8 +498,31 @@ fn android_apply_dashboard(
             app.set_overlay_creature_state("alert".into());
             app.set_overlay_delta_level("warning".into());
             app.set_overlay_delta_text("нет live-данных".into());
+            android_apply_live_token_state(app, &AndroidLiveTokenUiState::unknown());
         }
     }
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_apply_live_token_state(app: &AppWindow, state: &AndroidLiveTokenUiState) {
+    app.set_android_agent_pulse_label(state.pulse_label.into());
+    app.set_android_agent_pulse_level(state.pulse_level.into());
+    app.set_android_agent_rate_text(state.rate_text.clone().into());
+    app.set_android_agent_detail_text(state.detail_text.clone().into());
+    app.set_android_agent_history_path(state.history_path.clone().into());
+    app.set_android_agent_timeout_visible(state.timed_out);
+    app.set_agent_text(state.detail_text.clone().into());
+    app.set_token_rate_text(state.rate_text.clone().into());
+    let raw_rate = state
+        .rate_text
+        .split_whitespace()
+        .next()
+        .and_then(|value| value.replace(',', ".").parse::<f32>().ok())
+        .unwrap_or(0.0);
+    app.set_token_rate_raw(raw_rate);
+    app.set_android_agent_history(ModelRc::new(std::rc::Rc::new(VecModel::from(
+        state.history.clone(),
+    ))));
 }
 
 #[cfg(all(target_os = "android", feature = "android-gui"))]
@@ -771,6 +1085,72 @@ mod tests {
             requests: None,
             percent,
         }
+    }
+
+    fn test_pulse(token_rate: f64, sessions_active: u64) -> AgentPulse {
+        AgentPulse::from_abtop_status(&serde_json::json!({
+            "interval_ms": 1000,
+            "token_rate": token_rate,
+            "sessions_total": 1,
+            "sessions_active": sessions_active
+        }))
+    }
+
+    #[test]
+    fn android_live_token_tracker_marks_active_with_rate() {
+        let mut tracker = AndroidLiveTokenTracker::new(4, 45);
+        let pulse = test_pulse(12.5, 1);
+
+        let state = tracker.observe(Some(&pulse), 100);
+
+        assert_eq!(state.pulse_label, "Active");
+        assert_eq!(state.pulse_level, "active");
+        assert_eq!(state.rate_text, "12,5 ток/сек");
+        assert!(!state.timed_out);
+        assert_eq!(state.history, vec![100.0]);
+        assert!(state.history_path.starts_with("M "));
+    }
+
+    #[test]
+    fn android_live_token_tracker_marks_finished_after_zero_timeout() {
+        let mut tracker = AndroidLiveTokenTracker::new(4, 45);
+        let active = test_pulse(8.0, 1);
+        let idle = test_pulse(0.0, 0);
+
+        tracker.observe(Some(&active), 100);
+        let before_timeout = tracker.observe(Some(&idle), 130);
+        let after_timeout = tracker.observe(Some(&idle), 145);
+
+        assert_eq!(before_timeout.pulse_label, "Idle");
+        assert_eq!(before_timeout.pulse_level, "idle");
+        assert!(!before_timeout.timed_out);
+        assert_eq!(after_timeout.pulse_label, "Idle");
+        assert_eq!(after_timeout.pulse_level, "finished");
+        assert!(after_timeout.timed_out);
+        assert!(after_timeout.detail_text.contains("пул заверш"));
+    }
+
+    #[test]
+    fn android_live_token_tracker_keeps_unknown_privacy_safe() {
+        let mut tracker = AndroidLiveTokenTracker::new(4, 45);
+
+        let state = tracker.observe(None, 100);
+
+        assert_eq!(state.pulse_label, "Unknown");
+        assert_eq!(state.pulse_level, "unknown");
+        assert!(!state.timed_out);
+        assert!(state.history.is_empty());
+        assert!(!state.detail_text.to_lowercase().contains("api"));
+        assert!(!state.detail_text.to_lowercase().contains("key"));
+    }
+
+    #[test]
+    fn android_history_path_builds_line_commands() {
+        let path = android_history_path(&[0.0, 50.0, 100.0]);
+
+        assert!(path.starts_with("M "));
+        assert!(path.contains(" L "));
+        assert!(path.contains("100.00"));
     }
 
     #[test]

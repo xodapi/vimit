@@ -179,6 +179,42 @@ component LimitCard inherits Rectangle {
     }
 }
 
+component LiveTokenChart inherits Rectangle {
+    in property <string> commands;
+    in property <string> level;
+
+    height: 54px;
+    background: #111721;
+    border-color: #263043;
+    border-width: 1px;
+    border-radius: 8px;
+
+    Path {
+        width: max(1px, parent.width - 20px);
+        height: parent.height - 14px;
+        x: 10px;
+        y: 7px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 100;
+        viewbox-height: 42;
+        fill: transparent;
+        stroke: root.level == "active" ? #3fb950 : root.level == "finished" ? #9be9a8 : root.level == "idle" ? #8da6c8 : #6f7f96;
+        stroke-width: 2px;
+        commands: root.commands;
+        visible: root.commands != "";
+    }
+
+    Text {
+        text: "нет данных";
+        color: Theme.text-muted;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        visible: root.commands == "";
+    }
+}
+
 component DonutChart inherits Rectangle {
     in property <string> remaining;
     in property <string> total;
@@ -476,6 +512,13 @@ export component AppWindow inherits Window {
     in property <bool> agent-alert-visible: false;
     in property <string> agent-alert-level: "ok";
     in property <string> agent-alert-text: "";
+    in property <string> android-agent-pulse-label: "Unknown";
+    in property <string> android-agent-pulse-level: "unknown";
+    in property <string> android-agent-rate-text: "токены/сек: нет данных";
+    in property <string> android-agent-detail-text: "телеметрия недоступна";
+    in property <[float]> android-agent-history: [];
+    in property <string> android-agent-history-path: "";
+    in property <bool> android-agent-timeout-visible: false;
     in property <string> footer-text: ".env: текущая папка, затем рядом с exe";
     in-out property <bool> settings-open: false;
     in-out property <int> period-mode: 0;
@@ -832,6 +875,77 @@ export component AppWindow inherits Window {
                             commands: root.overlay-creature-path;
                             node-count: root.overlay-creature-points;
                         }
+                    }
+                }
+            }
+
+            if (root.is-android) : Rectangle {
+                min-height: root.android-agent-timeout-visible ? 214px : 190px;
+                background: Theme.bg-card;
+                border-radius: 10px;
+                border-color: root.android-agent-pulse-level == "active" ? #3fb950 : root.android-agent-pulse-level == "finished" ? #9be9a8 : root.android-agent-pulse-level == "idle" ? #8da6c8 : Theme.border;
+                border-width: 1px;
+
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+
+                        Text {
+                            text: "Agent pulse";
+                            color: Theme.text-primary;
+                            font-size: 16px;
+                            font-weight: 900;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle { }
+
+                        Rectangle {
+                            width: 92px;
+                            height: 28px;
+                            border-radius: 14px;
+                            background: root.android-agent-pulse-level == "active" ? #3fb950 : root.android-agent-pulse-level == "finished" ? #9be9a8 : root.android-agent-pulse-level == "idle" ? #8da6c8 : #303846;
+
+                            Text {
+                                text: root.android-agent-pulse-label;
+                                color: #11141a;
+                                font-size: 13px;
+                                font-weight: 900;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: root.android-agent-rate-text;
+                        color: root.android-agent-pulse-level == "active" ? #7fb69c : root.android-agent-pulse-level == "finished" ? #9be9a8 : #8da6c8;
+                        font-size: 22px;
+                        font-weight: 900;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        text: root.android-agent-detail-text;
+                        color: Theme.text-muted;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+
+                    if (root.android-agent-timeout-visible) : Text {
+                        text: "Idle: пул задач завершён";
+                        color: #9be9a8;
+                        font-size: 12px;
+                        font-weight: 800;
+                        wrap: word-wrap;
+                    }
+
+                    LiveTokenChart {
+                        commands: root.android-agent-history-path;
+                        level: root.android-agent-pulse-level;
                     }
                 }
             }
