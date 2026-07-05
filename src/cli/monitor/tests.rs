@@ -113,6 +113,28 @@ fn monitor_output_has_dashboard_sections() {
 }
 
 #[test]
+fn tui_header_shows_stale_cache_and_offline_separately() {
+    let mut snapshot = test_snapshot();
+    snapshot.stale = true;
+    snapshot.offline_duration_min = Some(4);
+    let rendered = render_tui_to_string(
+        Some(&snapshot),
+        None,
+        100,
+        30,
+        true,
+        75.0,
+        &HashMap::new(),
+        Preset::Full,
+        220,
+        32,
+    );
+
+    assert!(rendered.contains("STALE-CACHE"));
+    assert!(rendered.contains("API offline 4m"));
+}
+
+#[test]
 fn hbar_renders_correctly() {
     assert_eq!(hbar(50.0, 10), "[#####-----]");
     assert_eq!(hbar(0.0, 10), "[----------]");

@@ -61,6 +61,12 @@ private prompts.
 - **GUI** (`--features gui`): Slint-based desktop window with stealth toggle, sparklines, account dropdown, informative system tray tooltip with exact usage percentages on hover, proper taskbar application icon on Windows, updates configuration panel, and floating creature overlay.
 - **Safe by design**: API key from env only, never logged, no telemetry.
 
+## Stale Cache vs Offline API
+
+- `stale cache` means `vimit` could not fetch fresh `/v1/me` data and is showing the last cached snapshot instead.
+- `offline API` means the live API is currently unreachable; when cache fallback is available, output can show both states at once.
+- JSON exposes this explicitly with `data_status`, `api_status`, `stale`, and `offline_duration_min`.
+
 ## Download
 
 Release binaries:

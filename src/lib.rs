@@ -481,6 +481,7 @@ pub fn summary_to_json_with_stale(
     stale: bool,
     latency_ms: u64,
     active_endpoint: &str,
+    offline_duration_min: Option<u64>,
 ) -> Value {
     let mut obj = json!({
         "source": "vibemode",
@@ -494,9 +495,11 @@ pub fn summary_to_json_with_stale(
         })),
     });
     if let Some(map) = obj.as_object_mut() {
-        if stale {
-            map.insert("stale".to_string(), Value::Bool(true));
-        }
+        map.insert("stale".to_string(), Value::Bool(stale));
+        map.insert(
+            "data_status".to_string(),
+            Value::String(if stale { "stale_cache" } else { "live" }.to_string()),
+        );
         map.insert(
             "latency_ms".to_string(),
             Value::Number(serde_json::Number::from(latency_ms)),
@@ -505,7 +508,7 @@ pub fn summary_to_json_with_stale(
             "active_endpoint".to_string(),
             Value::String(active_endpoint.to_string()),
         );
-        if let Some(offline_mins) = get_offline_duration_min() {
+        if let Some(offline_mins) = offline_duration_min {
             map.insert(
                 "api_status".to_string(),
                 Value::String("offline".to_string()),
@@ -520,6 +523,10 @@ pub fn summary_to_json_with_stale(
                 Value::String("online".to_string()),
             );
         }
+        map.insert(
+            "degraded".to_string(),
+            Value::Bool(stale || offline_duration_min.is_some()),
+        );
     }
     obj
 }
@@ -773,6 +780,27 @@ mod tests {
 
         assert!(encoded.contains("\"source\":\"vibemode\""));
         assert!(!encoded.contains("usr_demo"));
+    }
+
+    #[test]
+    fn stale_and_offline_json_semantics_are_explicit() {
+        let windows = summarize_me(&demo_payload(), 75.0, 90.0);
+        let encoded = summary_to_json_with_stale(&windows, None, None, true, 123, "api", Some(4));
+
+        assert_eq!(encoded.get("stale"), Some(&Value::Bool(true)));
+        assert_eq!(
+            encoded.get("data_status"),
+            Some(&Value::String("stale_cache".to_string()))
+        );
+        assert_eq!(
+            encoded.get("api_status"),
+            Some(&Value::String("offline".to_string()))
+        );
+        assert_eq!(encoded.get("degraded"), Some(&Value::Bool(true)));
+        assert_eq!(
+            encoded.get("offline_duration_min"),
+            Some(&Value::Number(serde_json::Number::from(4_u64)))
+        );
     }
 
     #[test]
