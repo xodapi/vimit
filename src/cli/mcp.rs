@@ -99,6 +99,7 @@ impl VimitMcpServer {
             theme: cli::theme::Theme::Btop,
             with_abtop: false,
             notify: false,
+            ci_annotate: false,
             watch: 0,
             fail_on: cli::args::FailOn::Never,
             warning_threshold: cli::constants::DEFAULT_WARNING_THRESHOLD,

@@ -40,6 +40,7 @@ pub struct Args {
     pub theme: Theme,
     pub with_abtop: bool,
     pub notify: bool,
+    pub ci_annotate: bool,
     pub watch: u64,
     pub fail_on: FailOn,
     pub warning_threshold: f64,
@@ -80,6 +81,7 @@ where
         theme: Theme::Btop,
         with_abtop: false,
         notify: false,
+        ci_annotate: false,
         watch: 0,
         fail_on: FailOn::Never,
         warning_threshold: constants::DEFAULT_WARNING_THRESHOLD,
@@ -164,6 +166,7 @@ where
             }
             "--with-abtop" => parsed.with_abtop = true,
             "--notify" => parsed.notify = true,
+            "--ci-annotate" => parsed.ci_annotate = true,
             "--api-base" => parsed.api_base = Some(next_value(&mut iter, "--api-base")?),
             "--api-key-env" => parsed.api_key_env = next_value(&mut iter, "--api-key-env")?,
             "--env-file" => {
@@ -310,6 +313,7 @@ OPTIONS:
                              tritanopia, solarized, monokai
       --with-abtop           Merge local abtop --status-json output if available
       --notify               Desktop alert when a window enters warning/danger
+      --ci-annotate          Emit CI-friendly warning/error annotations to stderr
       --watch <SECONDS>      Poll every N seconds; default is 5 in --monitor
       --fail-on <LEVEL>      Exit non-zero on threshold: never, warning, danger
       --warning <PCT>        Warning threshold percentage [default: 75]
@@ -366,6 +370,12 @@ mod tests {
         assert!(args.notify);
         assert_eq!(args.watch, 60);
         assert!(args.auto_failover);
+    }
+
+    #[test]
+    fn ci_annotate_flag_is_parsed() {
+        let args = parse_args(["--ci-annotate".to_string()]).unwrap();
+        assert!(args.ci_annotate);
     }
 
     #[test]

@@ -296,7 +296,12 @@ CI/automation threshold:
 vimit --fail-on warning
 vimit --fail-on danger --json
 vimit --warning 80 --danger 95 --fail-on warning
+vimit --fail-on warning --ci-annotate
 ```
+
+`--ci-annotate` keeps normal stdout output intact and emits GitHub Actions-style
+`::warning` / `::error` lines to stderr for breached windows, so it can be used
+in CI logs without adding hook orchestration or request mutation.
 
 Compact one-line output for widgets/status bars:
 

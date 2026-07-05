@@ -49,6 +49,9 @@ pub fn run_once(
     }
 
     notifier.check_windows(&snapshot.windows);
+    if args.ci_annotate {
+        print_ci_annotations(&snapshot.windows);
+    }
 
     Ok(exit_code(&snapshot.windows, args.fail_on))
 }
@@ -156,6 +159,47 @@ fn format_agent(agent: &Value) -> String {
     )
 }
 
+fn print_ci_annotations(windows: &[ng::WindowState]) {
+    for annotation in ci_annotations(windows) {
+        eprintln!("{}", annotation);
+    }
+}
+
+fn ci_annotations(windows: &[ng::WindowState]) -> Vec<String> {
+    windows
+        .iter()
+        .filter_map(|window| match window.level.as_str() {
+            "warning" => Some(render_ci_annotation("warning", window)),
+            "danger" => Some(render_ci_annotation("error", window)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn render_ci_annotation(kind: &str, window: &ng::WindowState) -> String {
+    let peak = ng::peak_percent(window.credits.as_ref(), window.requests.as_ref()).unwrap_or(0.0);
+    let message = format!(
+        "{} window hit {} at {:.1}% (reset {})",
+        window.key,
+        window.level,
+        peak,
+        ng::format_duration_opt(window.reset_in_seconds)
+    );
+    format!(
+        "::{} title={}::{}",
+        kind,
+        escape_github_annotation("vimit threshold breach"),
+        escape_github_annotation(&message)
+    )
+}
+
+fn escape_github_annotation(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
 fn exit_code(windows: &[ng::WindowState], fail_on: FailOn) -> i32 {
     match fail_on {
         FailOn::Never => 0,
@@ -219,5 +263,63 @@ mod tests {
         assert_eq!(exit_code(&windows, FailOn::Warning), 2);
         assert_eq!(exit_code(&windows, FailOn::Danger), 3);
         assert_eq!(exit_code(&windows, FailOn::Never), 0);
+    }
+
+    #[test]
+    fn ci_annotations_emit_warning_and_error_entries() {
+        let windows = vec![
+            ng::WindowState {
+                key: "5h",
+                credits: Some(ng::Metric {
+                    used: 39.0,
+                    limit: 50.0,
+                    remaining: 11.0,
+                    percent: 78.0,
+                }),
+                requests: None,
+                reset: "unknown".to_string(),
+                reset_in_seconds: Some(3600),
+                level: "warning".to_string(),
+                percent: 78.0,
+            },
+            ng::WindowState {
+                key: "7d",
+                credits: Some(ng::Metric {
+                    used: 95.0,
+                    limit: 100.0,
+                    remaining: 5.0,
+                    percent: 95.0,
+                }),
+                requests: None,
+                reset: "unknown".to_string(),
+                reset_in_seconds: Some(120),
+                level: "danger".to_string(),
+                percent: 95.0,
+            },
+            ng::WindowState {
+                key: "30d",
+                credits: None,
+                requests: None,
+                reset: "unknown".to_string(),
+                reset_in_seconds: None,
+                level: "ok".to_string(),
+                percent: 0.0,
+            },
+        ];
+
+        let annotations = ci_annotations(&windows);
+
+        assert_eq!(annotations.len(), 2);
+        assert!(annotations[0].starts_with("::warning "));
+        assert!(annotations[0].contains("5h window hit warning at 78.0%"));
+        assert!(annotations[1].starts_with("::error "));
+        assert!(annotations[1].contains("7d window hit danger at 95.0%"));
+    }
+
+    #[test]
+    fn ci_annotation_escaping_matches_github_command_rules() {
+        let escaped = escape_github_annotation("danger 95%\nnext\rline");
+
+        assert_eq!(escaped, "danger 95%25%0Anext%0Dline");
     }
 }
