@@ -180,6 +180,28 @@ work.
 This is intentionally not a GitHub Release. Release tags and production
 release assets stay under the existing release workflow.
 
+## Android API key entry and storage
+
+For the current test APK, enter the API key directly in the Android UI:
+
+1. Paste the key into the `VIBEMODE_API_KEY` field.
+2. Tap `Сохранить ключ`.
+3. Tap `Проверить` to refresh live quota data.
+
+Do not bake `VIBEMODE_API_KEY` into the APK. Do not commit `.env` files,
+keystores, signing passwords, or any real credentials to the repository.
+
+Current storage model:
+
+- the key is stored in the app's private Android app storage;
+- the value is intended for local app use only and is not logged by the app;
+- this is better than shipping a key inside the APK, but it is not yet
+  encrypted at rest with Android Keystore-backed protection.
+
+Future hardening should move this secret to Android Keystore or another
+encrypted app-storage layer so the device keeps the same simple UI flow with a
+stronger storage guarantee.
+
 ## CI Android library check
 
 The main CI workflow installs the `aarch64-linux-android` Rust target and runs:
