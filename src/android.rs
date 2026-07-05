@@ -4,12 +4,12 @@ slint::include_modules!();
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 use slint::{ComponentHandle, SharedString, Weak};
 
-use crate::{AgentBurnEvent, AgentBurnState, DEFAULT_ANDROID_ALERT_COOLDOWN_SECS};
+use crate::{AgentBurnEvent, AgentBurnState, DEFAULT_ANDROID_ALERT_COOLDOWN_SECS, WindowState};
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 use crate::{
     DEFAULT_API_BASE, DEFAULT_DANGER_THRESHOLD, DEFAULT_WARNING_THRESHOLD, HttpClient, Router,
-    USER_AGENT_GUI, WindowState, api_fallbacks_for, dashboard_status, demo_payload, format_percent,
-    metric_text, peak_percent, short_number, summarize_me,
+    USER_AGENT_GUI, api_fallbacks_for, dashboard_status, demo_payload, format_percent, metric_text,
+    peak_percent, short_number, summarize_me,
 };
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 use std::fs;
@@ -194,6 +194,7 @@ fn android_apply_dashboard(
                 "30d",
                 windows.iter().find(|window| window.key == "30d"),
             );
+            android_apply_vimichi_dashboard_state(app, &windows);
         }
         Err(error) => {
             let msg = if error.contains("HTTP 401") {
@@ -203,7 +204,75 @@ fn android_apply_dashboard(
             };
             app.set_error_text(msg.into());
             app.set_status_text(msg.into());
+            app.set_overlay_creature_state("alert".into());
+            app.set_overlay_delta_level("warning".into());
+            app.set_overlay_delta_text("нет live-данных".into());
         }
+    }
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_apply_vimichi_dashboard_state(app: &AppWindow, windows: &[WindowState]) {
+    let state = android_vimichi_dashboard_state(windows);
+    app.set_overlay_creature_state(state.creature_state.into());
+    app.set_overlay_delta_level(state.delta_level.into());
+    app.set_overlay_delta_text(state.delta_text.into());
+    app.set_overlay_creature_percent(state.percent as f32);
+    app.set_overlay_creature_points(state.points);
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AndroidVimichiDashboardState {
+    pub creature_state: &'static str,
+    pub delta_level: &'static str,
+    pub delta_text: &'static str,
+    pub percent: f64,
+    pub points: i32,
+}
+
+pub fn android_vimichi_dashboard_state(windows: &[WindowState]) -> AndroidVimichiDashboardState {
+    let percent = windows
+        .iter()
+        .map(|window| window.percent)
+        .fold(0.0, f64::max)
+        .clamp(0.0, 100.0);
+    let has_usage = windows.iter().any(|window| {
+        window.percent > 0.0
+            || window
+                .credits
+                .as_ref()
+                .map(|metric| metric.used > 0.0)
+                .unwrap_or(false)
+            || window
+                .requests
+                .as_ref()
+                .map(|metric| metric.used > 0.0)
+                .unwrap_or(false)
+    });
+
+    let (creature_state, delta_level, delta_text) =
+        if windows.iter().any(|window| window.level == "danger") {
+            ("critical", "danger", "лимиты критично")
+        } else if windows.iter().any(|window| window.level == "warning") {
+            ("alert", "warning", "лимиты на грани")
+        } else if has_usage {
+            ("awake", "ok", "расход активен")
+        } else {
+            ("sleeping", "ok", "расхода нет")
+        };
+
+    let points = if creature_state == "sleeping" {
+        6
+    } else {
+        ((percent / 12.5).ceil() as i32).clamp(6, 12)
+    };
+
+    AndroidVimichiDashboardState {
+        creature_state,
+        delta_level,
+        delta_text,
+        percent,
+        points,
     }
 }
 
@@ -687,6 +756,23 @@ where
 mod tests {
     use super::*;
 
+    fn test_window(level: &str, percent: f64, used: f64) -> WindowState {
+        WindowState {
+            key: "24h",
+            level: level.to_string(),
+            reset: "сброс скоро".to_string(),
+            reset_in_seconds: Some(60),
+            credits: Some(crate::Metric {
+                used,
+                limit: 100.0,
+                remaining: 100.0 - used,
+                percent,
+            }),
+            requests: None,
+            percent,
+        }
+    }
+
     #[test]
     fn android_alert_gate_triggers_once_for_runaway() {
         let mut gate = AndroidAlertGate::new(300);
@@ -804,5 +890,45 @@ mod tests {
         assert!(gate.should_alert(&event, 1000));
         assert!(!gate.should_alert(&event, 1059));
         assert!(gate.should_alert(&event, 1060));
+    }
+
+    #[test]
+    fn android_vimichi_dashboard_state_marks_danger_as_critical() {
+        let state = android_vimichi_dashboard_state(&[test_window("danger", 94.0, 94.0)]);
+
+        assert_eq!(state.creature_state, "critical");
+        assert_eq!(state.delta_level, "danger");
+        assert_eq!(state.delta_text, "лимиты критично");
+        assert_eq!(state.percent, 94.0);
+        assert_eq!(state.points, 8);
+    }
+
+    #[test]
+    fn android_vimichi_dashboard_state_marks_warning_as_alert() {
+        let state = android_vimichi_dashboard_state(&[test_window("warning", 78.0, 78.0)]);
+
+        assert_eq!(state.creature_state, "alert");
+        assert_eq!(state.delta_level, "warning");
+        assert_eq!(state.delta_text, "лимиты на грани");
+    }
+
+    #[test]
+    fn android_vimichi_dashboard_state_marks_usage_as_awake() {
+        let state = android_vimichi_dashboard_state(&[test_window("ok", 12.0, 12.0)]);
+
+        assert_eq!(state.creature_state, "awake");
+        assert_eq!(state.delta_level, "ok");
+        assert_eq!(state.delta_text, "расход активен");
+        assert_eq!(state.points, 6);
+    }
+
+    #[test]
+    fn android_vimichi_dashboard_state_sleeps_without_usage() {
+        let state = android_vimichi_dashboard_state(&[test_window("ok", 0.0, 0.0)]);
+
+        assert_eq!(state.creature_state, "sleeping");
+        assert_eq!(state.delta_level, "ok");
+        assert_eq!(state.delta_text, "расхода нет");
+        assert_eq!(state.points, 6);
     }
 }
