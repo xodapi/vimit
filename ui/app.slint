@@ -779,6 +779,64 @@ export component AppWindow inherits Window {
             }
 
             if (root.is-android) : Rectangle {
+                min-height: 148px;
+                background: Theme.bg-card;
+                border-radius: 10px;
+                border-color: root.overlay-delta-level == "danger" ? Theme.danger : root.overlay-delta-level == "warning" ? Theme.warning : Theme.border;
+                border-width: 1px;
+
+                HorizontalLayout {
+                    padding: 14px;
+                    spacing: 12px;
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: "Vimichi";
+                            color: Theme.text-primary;
+                            font-size: 20px;
+                            font-weight: 900;
+                        }
+
+                        Text {
+                            text: root.overlay-creature-state == "sleeping" ? "спит, пока расхода нет" : root.overlay-creature-state == "alert" ? "насторожен: лимиты на грани" : root.overlay-creature-state == "critical" ? "тревога: высокий расход" : "бодрствует и следит за лимитами";
+                            color: root.overlay-delta-level == "danger" ? #f85149 : root.overlay-delta-level == "warning" ? #d29922 : #7fb69c;
+                            font-size: 14px;
+                            font-weight: 800;
+                            wrap: word-wrap;
+                        }
+
+                        Text {
+                            text: root.overlay-delta-text + " · пик " + root.overlay-creature-percent + "%";
+                            color: Theme.text-muted;
+                            font-size: 12px;
+                            wrap: word-wrap;
+                        }
+
+                        Rectangle { }
+                    }
+
+                    Rectangle {
+                        width: 132px;
+                        height: 112px;
+                        background: root.overlay-delta-level == "danger" ? #3d1a1a : root.overlay-delta-level == "warning" ? #3a2a1a : #163321;
+                        border-radius: 22px;
+
+                        PulseOrganism {
+                            x: 14px;
+                            y: 12px;
+                            level: root.overlay-delta-level;
+                            creature-state: root.overlay-creature-state;
+                            phase: root.overlay-pulse-phase;
+                            commands: root.overlay-creature-path;
+                            node-count: root.overlay-creature-points;
+                        }
+                    }
+                }
+            }
+
+            if (root.is-android) : Rectangle {
                 min-height: root.api-key-configured ? 112px : 146px;
                 background: Theme.bg-card;
                 border-radius: 10px;
