@@ -190,15 +190,24 @@ production release:
 1. Open GitHub Actions.
 2. Select `Android Test APK`.
 3. Click `Run workflow` on the branch you want to test.
-4. Download the `vimit-android-test-apk` artifact.
-5. Install `vimit.apk` on a device or emulator.
+4. Download `vimit-android-release-test-apk` for the lightweight test APK.
+5. Install `vimit.apk` from that artifact on a device or emulator.
 
-The artifact also contains `permissions.txt`, produced from the APK manifest.
-It must include:
+The workflow also publishes `vimit-android-test-apk`, which is the larger debug
+fallback artifact. Prefer the release-test artifact for normal phone testing;
+use the debug artifact only when diagnosing build/runtime problems. The
+release-test APK is signed with a temporary CI-generated test keystore; it is
+not the production release signing key.
+
+Each artifact contains `permissions.txt`, produced from the APK manifest. It
+must include:
 
 - `android.permission.INTERNET`
 - `android.permission.VIBRATE`
 - `android.permission.POST_NOTIFICATIONS`
+
+Each artifact also contains `vimit.apk.sha256` and `size.txt` so the downloaded
+APK can be checked before installation.
 
 Local build and manifest verification:
 
@@ -209,6 +218,26 @@ rustc tools/guarded-run.rs -O -o target/guarded-run
 ./target/guarded-run --timeout-secs 1800 --heartbeat-secs 30 -- \
   cargo apk build --features android-gui --target aarch64-linux-android --lib
 aapt dump permissions target/debug/apk/vimit.apk
+```
+
+Local lightweight release-test build:
+
+```bash
+mkdir -p target/android-signing
+keytool -genkeypair \
+  -keystore target/android-signing/release-test.keystore \
+  -storepass android \
+  -keypass android \
+  -alias androiddebugkey \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000 \
+  -dname "CN=Vimit Release Test, O=Vimit, C=US"
+CARGO_APK_RELEASE_KEYSTORE="$PWD/target/android-signing/release-test.keystore" \
+CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android \
+./target/guarded-run --timeout-secs 2400 --heartbeat-secs 30 -- \
+  cargo apk build --release --features android-gui --target aarch64-linux-android --lib
+aapt dump permissions target/release/apk/vimit.apk
 ```
 
 `tools/guarded-run.rs` is a tiny Rust wrapper for long-running commands. It

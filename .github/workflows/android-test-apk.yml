@@ -21,7 +21,7 @@ env:
   ANDROID_NDK_VERSION: "27.0.12077973"
 
 jobs:
-  build:
+  build-debug:
     name: Build manual-test APK
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +68,12 @@ jobs:
           grep -q "android.permission.VIBRATE" target/debug/apk/permissions.txt
           grep -q "android.permission.POST_NOTIFICATIONS" target/debug/apk/permissions.txt
           sha256sum "$APK" > target/debug/apk/vimit.apk.sha256
+          {
+            echo "artifact=vimit-android-test-apk"
+            echo "profile=debug"
+            stat -c "bytes=%s" "$APK"
+            du -h "$APK"
+          } > target/debug/apk/size.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -77,4 +83,86 @@ jobs:
             target/debug/apk/vimit.apk
             target/debug/apk/vimit.apk.sha256
             target/debug/apk/permissions.txt
+            target/debug/apk/size.txt
+          if-no-files-found: error
+
+  build-release-test:
+    name: Build lightweight release-test APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux GUI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager \
+            "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
+            "platforms;android-30" \
+            "platforms;android-35" \
+            "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Install Rust Android target and cargo-apk
+        run: |
+          rustup target add aarch64-linux-android
+          cargo install cargo-apk --locked
+
+      - name: Build guarded runner
+        run: |
+          mkdir -p target
+          rustc tools/guarded-run.rs -O -o target/guarded-run
+
+      - name: Generate release-test signing key
+        run: |
+          mkdir -p target/android-signing
+          keytool -genkeypair \
+            -keystore target/android-signing/release-test.keystore \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Vimit Release Test, O=Vimit, C=US"
+
+      - name: Build lightweight release APK
+        env:
+          CARGO_APK_RELEASE_KEYSTORE: ${{ github.workspace }}/target/android-signing/release-test.keystore
+          CARGO_APK_RELEASE_KEYSTORE_PASSWORD: android
+        run: |
+          ./target/guarded-run --timeout-secs 2400 --heartbeat-secs 30 -- \
+            cargo apk build --release --features android-gui --target aarch64-linux-android --lib
+
+      - name: Verify lightweight release manifest permissions
+        run: |
+          AAPT="${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS_VERSION}/aapt"
+          APK="target/release/apk/vimit.apk"
+          "$AAPT" dump permissions "$APK" | tee target/release/apk/permissions.txt
+          grep -q "android.permission.INTERNET" target/release/apk/permissions.txt
+          grep -q "android.permission.VIBRATE" target/release/apk/permissions.txt
+          grep -q "android.permission.POST_NOTIFICATIONS" target/release/apk/permissions.txt
+          sha256sum "$APK" > target/release/apk/vimit.apk.sha256
+          {
+            echo "artifact=vimit-android-release-test-apk"
+            echo "profile=release"
+            stat -c "bytes=%s" "$APK"
+            du -h "$APK"
+          } > target/release/apk/size.txt
+
+      - name: Upload lightweight release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vimit-android-release-test-apk
+          path: |
+            target/release/apk/vimit.apk
+            target/release/apk/vimit.apk.sha256
+            target/release/apk/permissions.txt
+            target/release/apk/size.txt
           if-no-files-found: error
