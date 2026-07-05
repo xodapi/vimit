@@ -139,6 +139,38 @@ That bridge can then decide:
 - how to debounce repeated notifications
 - whether tapping the notification opens the Slint Activity
 
+## Slint Android event-loop risk
+
+Known upstream issue: `slint-ui/slint#5699`
+(`upgrade_in_event_loop not always processed`) is open and labelled by Slint as
+Android-specific, low priority, and requiring an upstream fix.
+
+The reported failure mode is occasional: a background thread calls
+`upgrade_in_event_loop`, the closure appears to be queued, but it does not run
+until another later `upgrade_in_event_loop` call wakes the queue. This matters
+for vimit because Android refresh, notification-permission follow-up, Vimichi
+state, pulse, and live-chart updates use the same Slint UI-thread handoff
+pattern.
+
+Manual Android tests should include rapid repeated updates:
+
+- tap refresh/demo repeatedly while the dashboard is open;
+- trigger notification-permission flow and then refresh again;
+- watch Vimichi alarm/pulse state during quick active/idle transitions;
+- watch the live chart while token-rate samples arrive close together;
+- wait for idle timeout after zero-rate samples.
+
+If a rare Android UI update appears to be missed, do not immediately classify
+it as a vimit logic bug. First check whether the Rust-side state changed and
+whether a later UI-thread handoff flushes the pending update, matching the
+upstream Slint issue.
+
+There is no official workaround documented by Slint at the time of this note.
+If device testing reproduces the problem in vimit, open a focused bug issue and
+consider a small vimit-side mitigation such as coalesced retry with a short
+timeout for critical Android UI updates. Do not add that retry logic in an
+unrelated feature PR.
+
 ## Manifest and Android constraints
 
 The eventual implementation will likely require Android manifest metadata beyond
