@@ -113,6 +113,7 @@ impl VimitMcpServer {
             vpn: false,
             auto_failover: true,
             no_cache,
+            cache_ttl_secs: cli::cache::DEFAULT_TTL_SECS,
             trend: false,
             trend_days: 30,
             update: false,

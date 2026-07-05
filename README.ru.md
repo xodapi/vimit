@@ -264,6 +264,15 @@ vimit --monitor --threshold 5h=80:95,7d=90
 vimit --fail-on warning --threshold 24h=85:98
 ```
 
+Поведение API cache:
+
+- Успешные live-ответы `/v1/me` кэшируются на 30 секунд по умолчанию.
+- В `config.toml` можно задать `cache_ttl_secs = 120`.
+- `--no-cache` всегда делает live-запрос и не читает/не пишет API cache,
+  включая stale fallback.
+- В monitor mode клавиша `r` очищает cache entry текущего аккаунта/endpoint и
+  затем запускает refresh.
+
 Desktop-уведомления:
 
 ```bash

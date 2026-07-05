@@ -52,6 +52,9 @@ pub fn run_init() -> Result<i32, String> {
 
 # Poll interval in seconds (0 = single run)
 # watch = 0
+
+# API cache TTL in seconds; set to 0 to expire cached responses immediately.
+# cache_ttl_secs = 30
 "#;
         print!("  creating config.toml... ");
         io::stdout().flush().unwrap();

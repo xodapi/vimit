@@ -181,7 +181,11 @@ fn real_main() -> Result<i32, String> {
     }
 
     let trends = TrendStore::open()?;
-    let cache = CacheStore::open()?;
+    let mut cache = CacheStore::open()?;
+    if let Some(store) = cache.as_mut() {
+        store.set_ttl(args.cache_ttl_secs);
+    }
+    let cache_ref = if args.no_cache { None } else { cache.as_ref() };
     let mut notifier = Notifier::new(args.notify);
     let http = ng::HttpClient::new(ng::USER_AGENT)?;
     let mut router = ng::Router::new(
@@ -213,7 +217,7 @@ fn real_main() -> Result<i32, String> {
             &account_configs,
             initial_idx,
             trends.as_ref(),
-            cache.as_ref(),
+            cache_ref,
         );
     }
 
@@ -225,7 +229,7 @@ fn real_main() -> Result<i32, String> {
             &mut notifier,
             &http,
             trends.as_ref(),
-            cache.as_ref(),
+            cache_ref,
             Some(&mut router),
         )?;
         if args.watch == 0 {
@@ -320,6 +324,7 @@ fn merge_args_with_config(args: Args, merged: &MergedConfig) -> Args {
         vpn: args.vpn,
         auto_failover: args.auto_failover && merged.auto_failover,
         no_cache: args.no_cache,
+        cache_ttl_secs: merged.cache_ttl_secs,
         trend: args.trend,
         trend_days: args.trend_days,
         update: args.update,
