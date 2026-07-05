@@ -18,14 +18,26 @@ use std::path::PathBuf;
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 use std::sync::Mutex;
 
+const ANDROID_NOTIFICATION_RUNTIME_PERMISSION_SDK: i32 = 33;
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+const ANDROID_NOTIFICATION_PERMISSION_GRANTED: i32 = 0;
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+const ANDROID_POST_NOTIFICATIONS_PERMISSION: &str = "android.permission.POST_NOTIFICATIONS";
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+const ANDROID_NOTIFICATION_PERMISSION_REQUEST_CODE: i32 = 113;
+
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 #[unsafe(no_mangle)]
 pub fn android_main(app: slint::android::AndroidApp) {
     let data_dir = app.internal_data_path();
-    slint::android::init(app).expect("cannot initialize Android backend");
+    slint::android::init(app.clone()).expect("cannot initialize Android backend");
     let window = AppWindow::new().expect("cannot initialize Slint window");
     window.set_is_android(true);
     window.set_needs_setup(false);
+    if let Err(error) = android_request_notification_permission_if_needed(&app) {
+        window.set_source_text(format!("Android notification permission: {error}").into());
+    }
 
     let key_path = android_key_path(data_dir);
     let saved_key = android_load_api_key(&key_path).unwrap_or_default();
@@ -269,6 +281,14 @@ pub fn android_runaway_alert_text() -> AndroidAlertText {
     }
 }
 
+pub fn android_needs_notification_runtime_permission(sdk: i32) -> bool {
+    sdk >= ANDROID_NOTIFICATION_RUNTIME_PERMISSION_SDK
+}
+
+pub fn android_should_request_notification_permission(sdk: i32, granted: bool) -> bool {
+    android_needs_notification_runtime_permission(sdk) && !granted
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AndroidBurnUiState {
     pub visible: bool,
@@ -466,6 +486,12 @@ fn android_show_notification(
         }
 
         let sdk = android_sdk_int(env)?;
+        if android_needs_notification_runtime_permission(sdk)
+            && !android_has_notification_permission(env, activity)?
+        {
+            return Ok(());
+        }
+
         if sdk >= 26 {
             android_create_notification_channel(env, &manager, channel_id)?;
         }
@@ -547,6 +573,54 @@ fn android_show_notification(
         )?;
         Ok(())
     })
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_request_notification_permission_if_needed(
+    app: &slint::android::AndroidApp,
+) -> Result<(), String> {
+    let app = app.clone();
+    android_run_on_java_main_thread(&app, move |env, activity| {
+        let sdk = android_sdk_int(env)?;
+        if !android_should_request_notification_permission(
+            sdk,
+            android_has_notification_permission(env, activity)?,
+        ) {
+            return Ok(());
+        }
+
+        let permission = env.new_string(ANDROID_POST_NOTIFICATIONS_PERMISSION)?;
+        let permissions =
+            jni::objects::JObjectArray::<jni::objects::JString>::new(env, 1, &permission)?;
+        env.call_method(
+            activity,
+            jni::jni_str!("requestPermissions"),
+            jni::jni_sig!("([Ljava/lang/String;I)V"),
+            &[
+                jni::objects::JValue::Object(&permissions),
+                jni::objects::JValue::Int(ANDROID_NOTIFICATION_PERMISSION_REQUEST_CODE),
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+#[cfg(all(target_os = "android", feature = "android-gui"))]
+fn android_has_notification_permission(
+    env: &mut jni::Env,
+    activity: &jni::objects::JObject,
+) -> jni::errors::Result<bool> {
+    let permission = env.new_string(ANDROID_POST_NOTIFICATIONS_PERMISSION)?;
+    let permission = jni::objects::JObject::from(permission);
+    let grant = env
+        .call_method(
+            activity,
+            jni::jni_str!("checkSelfPermission"),
+            jni::jni_sig!("(Ljava/lang/String;)I"),
+            &[jni::objects::JValue::Object(&permission)],
+        )?
+        .i()?;
+    Ok(grant == ANDROID_NOTIFICATION_PERMISSION_GRANTED)
 }
 
 #[cfg(all(target_os = "android", feature = "android-gui"))]
@@ -670,6 +744,20 @@ mod tests {
         assert!(!combined.contains("prompt"));
         assert!(!combined.contains("session"));
         assert!(!combined.contains("c:\\"));
+    }
+
+    #[test]
+    fn android_notification_permission_is_runtime_only_on_android_13_plus() {
+        assert!(!android_needs_notification_runtime_permission(32));
+        assert!(android_needs_notification_runtime_permission(33));
+        assert!(android_needs_notification_runtime_permission(34));
+    }
+
+    #[test]
+    fn android_notification_permission_request_skips_when_already_granted() {
+        assert!(!android_should_request_notification_permission(32, false));
+        assert!(!android_should_request_notification_permission(33, true));
+        assert!(android_should_request_notification_permission(33, false));
     }
 
     #[test]

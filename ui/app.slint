@@ -764,6 +764,13 @@ export component AppWindow inherits Window {
                                 height: 46px;
                                 clicked => { root.settings-open = !root.settings-open; }
                             }
+
+                            Text {
+                                text: "Android 13+ спросит разрешение на уведомления. Если отказать, системные alerts могут не появиться, но вибрация и in-app тревога останутся.";
+                                color: Theme.text-muted;
+                                font-size: 11px;
+                                wrap: word-wrap;
+                            }
                         }
                     }
 
