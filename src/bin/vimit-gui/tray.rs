@@ -11,7 +11,7 @@ thread_local! {
     static TRAY_ICON: RefCell<Option<TrayIcon>> = const { RefCell::new(None) };
 }
 
-fn create_status_icon(color: (u8, u8, u8)) -> Icon {
+fn create_status_icon(color: (u8, u8, u8)) -> Option<Icon> {
     let width = 32;
     let height = 32;
     let mut rgba = vec![0u8; width * height * 4];
@@ -42,7 +42,13 @@ fn create_status_icon(color: (u8, u8, u8)) -> Icon {
         }
     }
 
-    Icon::from_rgba(rgba, width as u32, height as u32).expect("failed to create tray icon")
+    match Icon::from_rgba(rgba, width as u32, height as u32) {
+        Ok(icon) => Some(icon),
+        Err(error) => {
+            eprintln!("vimit-gui: tray icon unavailable: {error}");
+            None
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -74,7 +80,7 @@ pub(crate) fn try_init_tray() -> Option<TrayIds> {
     let tray_icon_instance = match TrayIconBuilder::new()
         .with_menu(Box::new(tray_menu))
         .with_tooltip("VibeMode Control")
-        .with_icon(create_status_icon((141, 150, 170)))
+        .with_icon(create_status_icon((141, 150, 170))?)
         .build()
     {
         Ok(icon) => icon,
@@ -135,8 +141,20 @@ pub(crate) fn tray_status_from_dashboard(source: &str, windows: &[ng::WindowStat
 pub(crate) fn update_tray_status(status: TrayStatus) {
     TRAY_ICON.with(|cell| {
         if let Some(ref mut tray) = *cell.borrow_mut() {
-            let _ = tray.set_icon(Some(create_status_icon(status.color)));
+            if let Some(icon) = create_status_icon(status.color) {
+                let _ = tray.set_icon(Some(icon));
+            }
             let _ = tray.set_tooltip(Some(status.tooltip));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_icon_creation_is_non_fatal_for_valid_pixels() {
+        assert!(create_status_icon((120, 173, 132)).is_some());
+    }
 }
