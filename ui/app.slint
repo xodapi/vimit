@@ -574,9 +574,14 @@ export component AppWindow inherits Window {
     if (!root.is-overlay && !root.needs-setup) : Rectangle {
         background: Theme.bg-primary;
 
-        VerticalLayout {
-            padding: 18px;
-            spacing: 12px;
+        ScrollView {
+            width: 100%;
+            height: 100%;
+            viewport-width: self.width;
+            VerticalLayout {
+                width: parent.width - 18px;
+                padding: 18px;
+                spacing: 12px;
 
             if (root.error-text != "") : Rectangle {
                 height: 32px;
@@ -1014,14 +1019,11 @@ export component AppWindow inherits Window {
                 }
             }
 
-            Rectangle {
-                visible: root.settings-open;
-                height: root.settings-open ? (root.is-android ? 560px : 270px) : 0px;
+            if (root.settings-open) : Rectangle {
                 background: Theme.bg-card;
                 border-radius: 8px;
                 border-color: Theme.border;
                 border-width: 1px;
-                clip: true;
 
                 VerticalLayout {
                     padding: 14px;
@@ -1642,6 +1644,7 @@ export component AppWindow inherits Window {
         }
     }
 
+        }
     if (!root.is-overlay && root.needs-setup) : Rectangle {
         background: Theme.bg-primary;
 
