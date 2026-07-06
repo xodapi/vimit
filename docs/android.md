@@ -219,6 +219,9 @@ plan and blocker record:
 Use the GitHub Actions workflow for a safe manual-test APK without creating a
 production release:
 
+For the separate `agent-device` tooling evaluation against Android APK smoke
+checks, see `docs/agent-device-evaluation.md`.
+
 1. Open GitHub Actions.
 2. Select `Android Test APK`.
 3. Click `Run workflow` on the branch you want to test.
