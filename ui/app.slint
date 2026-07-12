@@ -325,11 +325,13 @@ component PulseOrganism inherits Rectangle {
     in property <float> phase;
     in property <string> commands;
     in property <int> node-count;
+    in property <float> activity-energy;
+    in property <float> activity-burst;
 
     private property <brush> accent: root.creature-state == "sleeping" ? #6f7f96 : root.creature-state == "recovery" ? #9be9a8 : root.level == "danger" ? #f85149 : root.level == "warning" ? #d29922 : #3fb950;
     private property <bool> has-dynamic-shape: root.commands != "";
-    private property <float> energy-scale: root.creature-state == "sleeping" ? 0.78 : root.creature-state == "recovery" ? 1.10 : root.creature-state == "critical" ? 1.06 : 1.0;
-    private property <float> creature-opacity: root.creature-state == "sleeping" ? 0.58 : 0.88;
+    private property <float> energy-scale: (root.creature-state == "sleeping" ? 0.78 : root.creature-state == "recovery" ? 1.10 : root.creature-state == "critical" ? 1.06 : 1.0) + root.activity-energy * 0.12 + root.activity-burst * 0.08;
+    private property <float> creature-opacity: (root.creature-state == "sleeping" ? 0.58 : 0.88) + root.activity-energy * 0.10;
     private property <float> r0: 34 + 4 * sin(root.phase * 1deg);
     private property <float> r1: 32 + 5 * sin((root.phase + 48) * 1deg);
     private property <float> r2: 35 + 3 * sin((root.phase + 116) * 1deg);
@@ -403,7 +405,7 @@ component PulseOrganism inherits Rectangle {
         viewbox-height: 88;
         fill: root.accent;
         stroke: transparent;
-        opacity: root.creature-state == "sleeping" ? 0.08 : 0.13;
+        opacity: (root.creature-state == "sleeping" ? 0.08 : 0.13) + root.activity-energy * 0.08 + root.activity-burst * 0.05;
         visible: root.has-dynamic-shape;
         commands: root.commands;
     }
@@ -428,7 +430,7 @@ component PulseOrganism inherits Rectangle {
         y: 35px;
         border-radius: 9px;
         background: root.accent;
-        opacity: root.creature-state == "sleeping" ? 0.10 + 0.04 * sin(root.phase * 1deg) : 0.18 + 0.10 * sin(root.phase * 1deg);
+        opacity: root.creature-state == "sleeping" ? 0.10 + 0.04 * sin(root.phase * 1deg) : 0.18 + root.activity-energy * 0.14 + (0.10 + root.activity-burst * 0.08) * sin(root.phase * 1deg);
     }
 }
 
@@ -441,6 +443,9 @@ export component AppWindow inherits Window {
     in-out property <int> overlay-unit: 0;
     in-out property <int> overlay-reset-seconds: -1;
     in property <float> token-rate-raw: 0.0;
+    in property <float> overlay-activity-energy: 0.0;
+    in property <float> overlay-activity-burst: 0.0;
+    in property <int> overlay-active-sessions: 0;
 
     preferred-width: root.is-overlay ? (root.is-compact ? 260px : 340px) : root.is-android ? 420px : 1120px;
     preferred-height: root.is-overlay ? (root.is-compact ? 52px : 380px) : root.is-android ? 760px : 720px;
@@ -1879,7 +1884,7 @@ export component AppWindow inherits Window {
                 spacing: 4px;
                 HorizontalLayout {
                     Text {
-                        text: "живой расход · " + (root.overlay-creature-state == "sleeping" ? "спит" : root.overlay-creature-state == "alert" ? "насторожен" : root.overlay-creature-state == "critical" ? "тревога" : root.overlay-creature-state == "recovery" ? "выдох" : "бодрствует") + " · \{root.overlay-creature-points} точек";
+                        text: "живой расход · " + (root.overlay-creature-state == "sleeping" ? "спит" : root.overlay-creature-state == "alert" ? "насторожен" : root.overlay-creature-state == "critical" ? "тревога" : root.overlay-creature-state == "recovery" ? "выдох" : "бодрствует") + " · \{root.overlay-creature-points} точек · \{root.overlay-active-sessions} active";
                         font-size: 11px;
                         color: #7d8590;
                         vertical-alignment: center;
@@ -1903,6 +1908,8 @@ export component AppWindow inherits Window {
                         phase: root.overlay-pulse-phase;
                         commands: root.overlay-creature-path;
                         node-count: root.overlay-creature-points;
+                        activity-energy: root.overlay-activity-energy;
+                        activity-burst: root.overlay-activity-burst;
                     }
                 }
             }

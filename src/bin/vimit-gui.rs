@@ -28,10 +28,12 @@ mod tests {
     use crate::config::{GuiAccount, runtime_config};
     use crate::overlay::{
         CreatureSound, CreatureState, OVERLAY_HISTORY_RETENTION, OverlayHistory,
-        build_overlay_state, creature_node_count, creature_node_count_for_skin,
-        creature_path_commands, creature_path_commands_for_skin, creature_sound_for_transition,
-        creature_state_for, creature_state_from_str, format_overlay_countdown, one_decimal_local,
-        organic_creature_node_count, overlay_logical_size, overlay_phase_step, parse_rate_value,
+        activity_creature_percent, build_overlay_state, creature_node_count,
+        creature_node_count_for_skin, creature_path_commands, creature_path_commands_for_skin,
+        creature_sound_for_transition, creature_state_for, creature_state_from_str,
+        format_overlay_countdown, one_decimal_local, organic_creature_node_count,
+        overlay_logical_size, overlay_phase_step, overlay_phase_step_for_activity,
+        parse_rate_value,
     };
     use crate::platform::read_agent_status_for_gui;
     use crate::tray::tray_status_from_dashboard;
@@ -120,6 +122,16 @@ mod tests {
         );
         assert_eq!(creature_state_from_str("sleeping"), CreatureState::Sleeping);
         assert_eq!(creature_state_from_str("unknown"), CreatureState::Awake);
+    }
+
+    #[test]
+    fn activity_energy_enlivens_creature_without_changing_quota_state() {
+        let base = overlay_phase_step(CreatureState::Awake);
+        let active = overlay_phase_step_for_activity(CreatureState::Awake, 0.8, 0.6);
+
+        assert!(active > base);
+        assert!(activity_creature_percent(40.0, 0.8) > 40.0);
+        assert_eq!(activity_creature_percent(99.0, 1.0), 100.0);
     }
 
     #[test]
@@ -248,7 +260,12 @@ mod tests {
         let history = Arc::new(Mutex::new(OverlayHistory::default()));
         let windows = vec![test_window("5h", "warning", 78.0)];
 
-        let state = build_overlay_state(&windows, "10,0 токены/мин", &history);
+        let state = build_overlay_state(
+            &windows,
+            "10,0 токены/мин",
+            &history,
+            ng::ActivitySignal::default(),
+        );
 
         assert_eq!(state.credit_rate_text, "0,0 кред/мин");
         assert_eq!(state.token_rate_text, "10,0 токены/мин");

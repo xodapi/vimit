@@ -1,11 +1,13 @@
 #![allow(clippy::collapsible_if)]
 
+pub mod activity;
 pub mod android;
 pub mod api;
 pub mod cli;
 pub mod dashboard_refresh;
 pub mod parse;
 
+pub use activity::*;
 #[cfg(all(target_os = "android", feature = "android-gui"))]
 pub use android::{AndroidAlertBridge, android_handle_burn_event, android_main};
 pub use android::{

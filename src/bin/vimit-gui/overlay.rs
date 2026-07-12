@@ -176,35 +176,59 @@ impl CreatureState {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn creature_state_for(
     percent: f32,
     credit_rate: f32,
     reset_detected: bool,
     samples_len: usize,
 ) -> CreatureState {
+    creature_state_for_activity(percent, credit_rate, 0.0, reset_detected, samples_len)
+}
+
+pub(crate) fn creature_state_for_activity(
+    percent: f32,
+    credit_rate: f32,
+    activity_energy: f32,
+    reset_detected: bool,
+    samples_len: usize,
+) -> CreatureState {
     if reset_detected {
         return CreatureState::Recovery;
-    }
-    if samples_len > 1 && credit_rate <= 0.05 {
-        return CreatureState::Sleeping;
     }
     if percent >= 90.0 {
         CreatureState::Critical
     } else if percent >= 75.0 {
         CreatureState::Alert
+    } else if samples_len > 1 && credit_rate <= 0.05 && activity_energy <= 0.05 {
+        CreatureState::Sleeping
     } else {
         CreatureState::Awake
     }
 }
 
+#[cfg(test)]
 pub(crate) fn overlay_phase_step(state: CreatureState) -> f32 {
-    match state {
+    overlay_phase_step_for_activity(state, 0.0, 0.0)
+}
+
+pub(crate) fn overlay_phase_step_for_activity(
+    state: CreatureState,
+    activity_energy: f32,
+    activity_burst: f32,
+) -> f32 {
+    let base = match state {
         CreatureState::Sleeping => 2.0,
         CreatureState::Awake => 7.0,
         CreatureState::Alert => 9.0,
         CreatureState::Critical => 13.0,
         CreatureState::Recovery => 16.0,
-    }
+    };
+    base * (1.0 + activity_energy.clamp(0.0, 1.0) * 0.75 + activity_burst.clamp(0.0, 1.0) * 0.5)
+}
+
+pub(crate) fn activity_creature_percent(percent: f32, activity_energy: f32) -> f32 {
+    (percent + activity_energy.clamp(0.0, 1.0) * 18.0).min(100.0)
 }
 
 pub(crate) fn creature_state_from_str(value: &str) -> CreatureState {
@@ -349,6 +373,9 @@ pub(crate) struct OverlayState {
     pub(crate) spark_data: Vec<f32>,
     pub(crate) creature_percent: f32,
     pub(crate) creature_state: CreatureState,
+    pub(crate) activity_energy: f32,
+    pub(crate) activity_burst: f32,
+    pub(crate) active_sessions: u32,
     pub(crate) delta_text: String,
     pub(crate) delta_level: String,
     pub(crate) reset_label: String,
@@ -359,6 +386,7 @@ pub(crate) fn build_overlay_state(
     windows: &[ng::WindowState],
     token_rate_text: &str,
     history: &Arc<Mutex<OverlayHistory>>,
+    activity: ng::ActivitySignal,
 ) -> OverlayState {
     let now = Instant::now();
     let five = windows.iter().find(|window| window.key == "5h");
@@ -375,10 +403,12 @@ pub(crate) fn build_overlay_state(
     let samples: Vec<f32> = history.samples.iter().copied().collect();
     let spark_data = scale_samples(&samples);
     let token_rate = parse_rate_value(token_rate_text).unwrap_or(credit_rate * 750.0);
-    let creature_percent = five.map(|window| window.percent as f32).unwrap_or(0.0);
-    let creature_state = creature_state_for(
-        creature_percent,
+    let quota_percent = five.map(|window| window.percent as f32).unwrap_or(0.0);
+    let creature_percent = activity_creature_percent(quota_percent, activity.energy);
+    let creature_state = creature_state_for_activity(
+        quota_percent,
         credit_rate,
+        activity.energy,
         reset_detected,
         history.samples.len(),
     );
@@ -397,6 +427,9 @@ pub(crate) fn build_overlay_state(
         spark_data,
         creature_percent,
         creature_state,
+        activity_energy: activity.energy,
+        activity_burst: activity.burst,
+        active_sessions: activity.active_sessions,
         delta_text,
         delta_level,
         reset_label,

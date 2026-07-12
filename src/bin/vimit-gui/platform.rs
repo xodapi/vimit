@@ -111,34 +111,51 @@ pub(crate) fn open_path(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("cannot open {}: {error}", path.display()))
 }
 
+#[cfg(test)]
 pub(crate) fn read_agent_status_for_gui(binary: &str) -> ng::AgentStatus {
+    read_agent_status_with_activity(binary).0
+}
+
+pub(crate) fn read_agent_status_with_activity(binary: &str) -> (ng::AgentStatus, Option<Value>) {
     if binary.trim().is_empty() {
-        return ng::AgentStatus {
-            summary: "агенты: abtop отключён; задайте ABTOP_BIN".to_string(),
-            token_rate: "токены/мин: нет данных abtop".to_string(),
-        };
+        return (
+            ng::AgentStatus {
+                summary: "агенты: abtop отключён; задайте ABTOP_BIN".to_string(),
+                token_rate: "токены/мин: нет данных abtop".to_string(),
+            },
+            None,
+        );
     }
 
     let mut command = Command::new(binary);
     command.arg("--status-json");
     suppress_windows_console(&mut command);
     let Ok(output) = command.output() else {
-        return ng::AgentStatus {
-            summary: "агенты: abtop не найден; задайте ABTOP_BIN".to_string(),
-            token_rate: "токены/мин: нет данных abtop".to_string(),
-        };
+        return (
+            ng::AgentStatus {
+                summary: "агенты: abtop не найден; задайте ABTOP_BIN".to_string(),
+                token_rate: "токены/мин: нет данных abtop".to_string(),
+            },
+            None,
+        );
     };
     if !output.status.success() {
-        return ng::AgentStatus {
-            summary: "агенты: статус abtop недоступен".to_string(),
-            token_rate: "токены/мин: нет данных abtop".to_string(),
-        };
+        return (
+            ng::AgentStatus {
+                summary: "агенты: статус abtop недоступен".to_string(),
+                token_rate: "токены/мин: нет данных abtop".to_string(),
+            },
+            None,
+        );
     }
     let Ok(parsed) = serde_json::from_slice::<Value>(&output.stdout) else {
-        return ng::AgentStatus {
-            summary: "агенты: abtop вернул невалидный JSON".to_string(),
-            token_rate: "токены/мин: нет данных abtop".to_string(),
-        };
+        return (
+            ng::AgentStatus {
+                summary: "агенты: abtop вернул невалидный JSON".to_string(),
+                token_rate: "токены/мин: нет данных abtop".to_string(),
+            },
+            None,
+        );
     };
     let sessions = parsed
         .get("sessions_total")
@@ -166,12 +183,15 @@ pub(crate) fn read_agent_status_for_gui(binary: &str) -> ng::AgentStatus {
         .and_then(ng::to_number)
         .or_else(|| summed_agent_token_rate_for_gui(&parsed));
 
-    ng::AgentStatus {
-        summary: format!("агенты: сессий {sessions}, активных {active}, контекст макс. {ctx}"),
-        token_rate: token_rate
-            .map(|value| format!("токены/мин: {}", ng::short_rate(value)))
-            .unwrap_or_else(|| "токены/мин: нет данных abtop".to_string()),
-    }
+    (
+        ng::AgentStatus {
+            summary: format!("агенты: сессий {sessions}, активных {active}, контекст макс. {ctx}"),
+            token_rate: token_rate
+                .map(|value| format!("токены/мин: {}", ng::short_rate(value)))
+                .unwrap_or_else(|| "токены/мин: нет данных abtop".to_string()),
+        },
+        Some(parsed),
+    )
 }
 
 fn summed_agent_token_rate_for_gui(parsed: &Value) -> Option<f64> {
