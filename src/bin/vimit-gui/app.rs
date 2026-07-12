@@ -12,7 +12,7 @@ use crate::dashboard::start_refresh;
 use crate::ng;
 use crate::overlay::{
     OverlayHistory, creature_node_count_for_skin, creature_path_commands_for_skin,
-    creature_state_from_str, overlay_phase_step, set_overlay_window_size,
+    creature_state_from_str, overlay_phase_step_for_activity, set_overlay_window_size,
 };
 use crate::platform::{
     ensure_accounts_template, ensure_config_dir, ensure_env_template, open_path, spawn_mini_overlay,
@@ -118,7 +118,13 @@ pub(crate) fn run() {
     pulse_timer.start(TimerMode::Repeated, Duration::from_millis(80), move || {
         if let Some(app) = weak.upgrade() {
             let state = creature_state_from_str(app.get_overlay_creature_state().as_str());
-            let next = (app.get_overlay_pulse_phase() + overlay_phase_step(state)) % 360.0;
+            let next = (app.get_overlay_pulse_phase()
+                + overlay_phase_step_for_activity(
+                    state,
+                    app.get_overlay_activity_energy(),
+                    app.get_overlay_activity_burst(),
+                ))
+                % 360.0;
             app.set_overlay_pulse_phase(next);
             let percent = app.get_overlay_creature_percent();
             let skin = app.get_overlay_creature_skin();
@@ -191,6 +197,7 @@ pub(crate) fn run() {
     let refresh_gen = Arc::new(AtomicU64::new(0));
     let is_refreshing = Arc::new(AtomicBool::new(false));
     let overlay_history = Arc::new(Mutex::new(OverlayHistory::default()));
+    let activity_tracker = Arc::new(Mutex::new(ng::ActivityTracker::default()));
     let demo_mode = Arc::new(AtomicBool::new(force_demo));
 
     let (account_names, account_configs) = load_gui_accounts();
@@ -235,6 +242,7 @@ pub(crate) fn run() {
     let generation = refresh_gen.clone();
     let refreshing = is_refreshing.clone();
     let history = overlay_history.clone();
+    let activity = activity_tracker.clone();
     let demo_mode_refresh = demo_mode.clone();
     let mock_path_refresh = mock_path.clone();
     let failover_refresh = auto_api_failover.clone();
@@ -251,6 +259,7 @@ pub(crate) fn run() {
             generation.clone(),
             refreshing.clone(),
             history.clone(),
+            activity.clone(),
             failover_refresh.clone(),
         );
     });
@@ -262,6 +271,7 @@ pub(crate) fn run() {
     let generation = refresh_gen.clone();
     let refreshing = is_refreshing.clone();
     let history = overlay_history.clone();
+    let activity = activity_tracker.clone();
     let demo_mode_refresh = demo_mode.clone();
     let mock_path_refresh = mock_path.clone();
     let failover_refresh = auto_api_failover.clone();
@@ -279,6 +289,7 @@ pub(crate) fn run() {
             generation.clone(),
             refreshing.clone(),
             history.clone(),
+            activity.clone(),
             failover_refresh.clone(),
         );
     });
@@ -290,6 +301,7 @@ pub(crate) fn run() {
     let generation = refresh_gen.clone();
     let refreshing = is_refreshing.clone();
     let history = overlay_history.clone();
+    let activity = activity_tracker.clone();
     let demo_mode_refresh = demo_mode.clone();
     let mock_path_refresh = mock_path.clone();
     let failover_refresh = auto_api_failover.clone();
@@ -306,6 +318,7 @@ pub(crate) fn run() {
             generation.clone(),
             refreshing.clone(),
             history.clone(),
+            activity.clone(),
             failover_refresh.clone(),
         );
     });
@@ -330,6 +343,7 @@ pub(crate) fn run() {
     let generation = refresh_gen.clone();
     let refreshing = is_refreshing.clone();
     let history = overlay_history.clone();
+    let activity = activity_tracker.clone();
     let demo_mode_refresh = demo_mode.clone();
     let mock_path_refresh = mock_path.clone();
     let failover_refresh = auto_api_failover.clone();
@@ -346,6 +360,7 @@ pub(crate) fn run() {
             generation.clone(),
             refreshing.clone(),
             history.clone(),
+            activity.clone(),
             failover_refresh.clone(),
         );
     });
@@ -362,6 +377,7 @@ pub(crate) fn run() {
         refresh_gen.clone(),
         is_refreshing.clone(),
         overlay_history.clone(),
+        activity_tracker.clone(),
         auto_api_failover.clone(),
     );
 

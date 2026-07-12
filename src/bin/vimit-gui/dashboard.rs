@@ -12,7 +12,6 @@ use crate::overlay::{
     CreatureState, OverlayHistory, OverlayState, build_overlay_state, creature_node_count_for_skin,
     creature_path_commands_for_skin, format_overlay_countdown, maybe_play_creature_sound,
 };
-use crate::platform::read_agent_status_for_gui;
 use crate::tray::{TrayStatus, tray_status_from_dashboard, update_tray_status};
 
 pub(crate) struct GuiDashboardResult {
@@ -38,6 +37,7 @@ pub(crate) fn start_refresh(
     generation: Arc<AtomicU64>,
     is_refreshing: Arc<AtomicBool>,
     overlay_history: Arc<Mutex<OverlayHistory>>,
+    activity_tracker: Arc<Mutex<ng::ActivityTracker>>,
     auto_failover: Arc<AtomicBool>,
 ) {
     if is_refreshing.swap(true, Ordering::SeqCst) {
@@ -55,6 +55,7 @@ pub(crate) fn start_refresh(
             danger,
             &router,
             &overlay_history,
+            &activity_tracker,
             auto_failover.load(Ordering::Relaxed),
         );
         if generation.load(Ordering::Relaxed) != my_gen {
@@ -117,6 +118,9 @@ pub(crate) fn apply_dashboard(app: &AppWindow, result: Result<GuiDashboardResult
             );
             app.set_overlay_creature_percent(result.overlay.creature_percent);
             app.set_overlay_creature_state(result.overlay.creature_state.as_str().into());
+            app.set_overlay_activity_energy(result.overlay.activity_energy);
+            app.set_overlay_activity_burst(result.overlay.activity_burst);
+            app.set_overlay_active_sessions(result.overlay.active_sessions as i32);
             let skin = app.get_overlay_creature_skin();
             app.set_overlay_creature_points(creature_node_count_for_skin(
                 result.overlay.creature_percent,
@@ -280,6 +284,7 @@ fn load_dashboard(
     danger: f64,
     router: &Arc<Mutex<ng::Router>>,
     overlay_history: &Arc<Mutex<OverlayHistory>>,
+    activity_tracker: &Arc<Mutex<ng::ActivityTracker>>,
     auto_failover: bool,
 ) -> Result<GuiDashboardResult, String> {
     let dotenv = if force_demo || mock_path.is_some() {
@@ -310,8 +315,17 @@ fn load_dashboard(
     let abtop_bin = config.abtop_bin.clone();
     let live_api_key_present = shared.live_api_key_present;
     let mut dashboard = shared.dashboard;
-    let agent = read_agent_status_for_gui(&abtop_bin);
-    let overlay = build_overlay_state(&dashboard.windows, &agent.token_rate, overlay_history);
+    let (agent, abtop_status) = crate::platform::read_agent_status_with_activity(&abtop_bin);
+    let activity = activity_tracker.lock().unwrap().observe(
+        abtop_status.as_ref(),
+        ng::read_default_factory_activity_snapshot(),
+    );
+    let overlay = build_overlay_state(
+        &dashboard.windows,
+        &agent.token_rate,
+        overlay_history,
+        activity,
+    );
 
     let mut five_trend_data = Vec::new();
     let mut day_trend_data = Vec::new();
